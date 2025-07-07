@@ -15,9 +15,9 @@ class ApiConfig {
 
   // Validar si la API key está configurada
   static bool get isApiKeyConfigured =>
-      googleMapsApiKey.isNotEmpty && googleMapsApiKey != 'AIzaSyDbpv3i7Tno3aicF4_1GnUUHGQLFo1GOLY';
+      googleMapsApiKey.isNotEmpty;
 
-  // Obtener URL completa para Directions API
+  // Obtener URL completa para Directions APIs
   static String getDirectionsUrl() => directionsApiUrl;
 
   // Obtener URL completa para Distance Matrix API
@@ -26,6 +26,7 @@ class ApiConfig {
   // Obtener API key con validación
   static String getApiKey() {
     if (!isApiKeyConfigured) {
+
       throw Exception('API Key de Google Maps no configurada. '
           'Edita el archivo lib/config/api_config.dart');
     }
