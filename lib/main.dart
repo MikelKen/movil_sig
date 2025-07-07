@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:sig/screens/route_map_screen.dart';
+import 'package:sig/screens/simple_map_screen.dart';
 import 'screens/interactive_map_screen.dart';
 
 void main() {

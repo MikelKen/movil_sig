@@ -44,10 +44,10 @@ class _DeliveryManagementScreenState extends State<DeliveryManagementScreen>
 
     try {
       print('=== CARGANDO DATOS ===');
-      final orderFromApi = await _dioProvider.getOrders();
-      if (orderFromApi != null) {
-        print('Datos cargados desde el empoint: ');
-      }
+      //final orderFromApi = await _dioProvider.getOrders();
+      //if (orderFromApi != null) {
+        //print('Datos cargados desde el empoint: ');
+      //}
       final orders = await _deliveryService.getOrders();
       final pendingOrders = await _deliveryService.getPendingOrders();
       final stats = await _deliveryService.getDeliveryStats();

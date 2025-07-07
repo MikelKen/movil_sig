@@ -94,6 +94,7 @@ class _OrderCardState extends State<OrderCard> {
                     'Productos:',
                     style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                       fontWeight: FontWeight.bold,
+                      color: Colors.black
                     ),
                   ),
                   const SizedBox(height: 8),
@@ -102,11 +103,17 @@ class _OrderCardState extends State<OrderCard> {
                     child: Row(
                       children: [
                         Expanded(
-                          child: Text('${item.name} x${item.quantity}'),
+                          child: Text('${item.name} x${item.quantity}',
+                          style: const TextStyle(
+                            color: Colors.black
+                          ),),
                         ),
                         Text(
                           'Bs. ${item.subtotal.toStringAsFixed(2)}',
-                          style: const TextStyle(fontWeight: FontWeight.bold),
+                          style: const TextStyle(
+                            fontWeight: FontWeight.bold,
+                            color: Colors.blueGrey,
+                          ),
                         ),
                       ],
                     ),
@@ -120,6 +127,7 @@ class _OrderCardState extends State<OrderCard> {
                           style: TextStyle(
                             fontWeight: FontWeight.bold,
                             fontSize: 16,
+                            color: Colors.black
                           ),
                         ),
                       ),
@@ -128,6 +136,7 @@ class _OrderCardState extends State<OrderCard> {
                         style: const TextStyle(
                           fontWeight: FontWeight.bold,
                           fontSize: 16,
+                          color: Colors.black
                         ),
                       ),
                     ],
@@ -165,7 +174,8 @@ class _OrderCardState extends State<OrderCard> {
                   children: [
                     const Text(
                       'Observaciones:',
-                      style: TextStyle(fontWeight: FontWeight.bold),
+                      style: TextStyle(fontWeight: FontWeight.bold,
+                      color: Colors.blueGrey),
                     ),
                     const SizedBox(height: 4),
                     Text(widget.order.observations!),
