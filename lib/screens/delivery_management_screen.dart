@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:sig/providers/dio_provider.dart';
 import '../models/order.dart';
 import '../models/delivery_route.dart';
 import '../services/delivery_service.dart';
@@ -17,6 +18,7 @@ class _DeliveryManagementScreenState extends State<DeliveryManagementScreen>
     with SingleTickerProviderStateMixin {
   late TabController _tabController;
   final DeliveryService _deliveryService = DeliveryService();
+  final DioProvider _dioProvider = DioProvider();
 
   List<Order> _allOrders = [];
   List<Order> _pendingOrders = [];
@@ -41,6 +43,11 @@ class _DeliveryManagementScreenState extends State<DeliveryManagementScreen>
     setState(() => _isLoading = true);
 
     try {
+      print('=== CARGANDO DATOS ===');
+      final orderFromApi = await _dioProvider.getOrders();
+      if (orderFromApi != null) {
+        print('Datos cargados desde el empoint: ');
+      }
       final orders = await _deliveryService.getOrders();
       final pendingOrders = await _deliveryService.getPendingOrders();
       final stats = await _deliveryService.getDeliveryStats();
