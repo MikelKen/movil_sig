@@ -25,6 +25,7 @@ class _DeliveryManagementScreenState extends State<DeliveryManagementScreen>
   DeliveryRoute? _currentRoute;
   DeliveryStats? _stats;
   bool _isLoading = true;
+  bool _isConnectedToBackend = false;
 
   @override
   void initState() {
@@ -44,27 +45,61 @@ class _DeliveryManagementScreenState extends State<DeliveryManagementScreen>
 
     try {
       print('=== CARGANDO DATOS ===');
-      //final orderFromApi = await _dioProvider.getOrders();
-      //if (orderFromApi != null) {
-        //print('Datos cargados desde el empoint: ');
-      //}
-      final orders = await _deliveryService.getOrders();
-      final pendingOrders = await _deliveryService.getPendingOrders();
-      final stats = await _deliveryService.getDeliveryStats();
 
-      setState(() {
-        _allOrders = orders;
-        _pendingOrders = pendingOrders;
-        _stats = stats;
-        _isLoading = false;
-      });
+      // Intentar cargar datos del backend primero
+      final ordersFromApi = await _dioProvider.getOrders();
+
+      if (ordersFromApi != null && ordersFromApi.isNotEmpty) {
+        print('✅ Datos cargados desde el backend: ${ordersFromApi.length} pedidos');
+        _isConnectedToBackend = true;
+
+        // Procesar los pedidos del backend
+        await _deliveryService.loadOrdersFromBackend(ordersFromApi);
+
+        // Obtener los pedidos ya procesados
+        final orders = await _deliveryService.getOrders();
+        final pendingOrders = await _deliveryService.getPendingOrders();
+        final stats = await _deliveryService.getDeliveryStats();
+
+        setState(() {
+          _allOrders = orders;
+          _pendingOrders = pendingOrders;
+          _stats = stats;
+          _isLoading = false;
+        });
+
+        print('📊 Estadísticas: ${stats.totalOrders} total, ${stats.pendingOrders} pendientes');
+      } else {
+        print('⚠️ No se pudieron cargar datos del backend, usando datos locales');
+        _isConnectedToBackend = false;
+
+        // Fallback a datos locales
+        final orders = await _deliveryService.getOrders();
+        final pendingOrders = await _deliveryService.getPendingOrders();
+        final stats = await _deliveryService.getDeliveryStats();
+
+        setState(() {
+          _allOrders = orders;
+          _pendingOrders = pendingOrders;
+          _stats = stats;
+          _isLoading = false;
+        });
+
+        print('📱 Usando datos locales: ${orders.length} pedidos');
+      }
     } catch (e) {
+      print('❌ Error al cargar datos: $e');
       setState(() => _isLoading = false);
+
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Error al cargar datos: $e'),
             backgroundColor: Colors.red,
+            action: SnackBarAction(
+              label: 'Reintentar',
+              onPressed: _loadData,
+            ),
           ),
         );
       }
@@ -75,7 +110,25 @@ class _DeliveryManagementScreenState extends State<DeliveryManagementScreen>
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Gestión de Entregas'),
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Gestión de Entregas'),
+            if (!_isLoading) ...[
+              Text(
+                _isConnectedToBackend ? '🟢 Conectado al servidor' : '🟡 Modo offline',
+                style: const TextStyle(fontSize: 12),
+              ),
+            ],
+          ],
+        ),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh),
+            onPressed: _loadData,
+            tooltip: 'Actualizar datos',
+          ),
+        ],
         bottom: TabBar(
           controller: _tabController,
           tabs: const [
@@ -110,6 +163,32 @@ class _DeliveryManagementScreenState extends State<DeliveryManagementScreen>
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            // Banner de estado de conexión
+            if (!_isConnectedToBackend) ...[
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(12),
+                margin: const EdgeInsets.only(bottom: 16),
+                decoration: BoxDecoration(
+                  color: Colors.orange.shade100,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.orange.shade300),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.offline_bolt, color: Colors.orange.shade700),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Trabajando en modo offline. Los datos se sincronizarán cuando se restablezca la conexión.',
+                        style: TextStyle(color: Colors.orange.shade700),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+
             Text(
               'Resumen del Día',
               style: Theme.of(context).textTheme.headlineSmall?.copyWith(
@@ -172,6 +251,45 @@ class _DeliveryManagementScreenState extends State<DeliveryManagementScreen>
             if (_currentRoute != null) ...[
               const SizedBox(height: 16),
               _buildCurrentRouteCard(),
+            ],
+
+            // Información adicional si hay datos del backend
+            if (_isConnectedToBackend && _allOrders.isNotEmpty) ...[
+              const SizedBox(height: 24),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Colors.green.shade50,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.green.shade200),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(Icons.cloud_done, color: Colors.green.shade700),
+                        const SizedBox(width: 8),
+                        Text(
+                          'Datos sincronizados',
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            color: Colors.green.shade700,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'Total de ${_allOrders.length} pedidos cargados desde el servidor. '
+                          'Última actualización: ${DateTime.now().hour.toString().padLeft(2, '0')}:'
+                          '${DateTime.now().minute.toString().padLeft(2, '0')}',
+                      style: TextStyle(color: Colors.green.shade600),
+                    ),
+                  ],
+                ),
+              ),
             ],
           ],
         ),
@@ -296,16 +414,24 @@ class _DeliveryManagementScreenState extends State<DeliveryManagementScreen>
     }
 
     if (_pendingOrders.isEmpty) {
-      return const Center(
+      return Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Icon(Icons.check_circle_outline, size: 64, color: Colors.grey),
-            SizedBox(height: 16),
-            Text(
+            const SizedBox(height: 16),
+            const Text(
               'No hay pedidos pendientes',
               style: TextStyle(fontSize: 18, color: Colors.grey),
             ),
+            if (!_isConnectedToBackend) ...[
+              const SizedBox(height: 8),
+              ElevatedButton.icon(
+                onPressed: _loadData,
+                icon: const Icon(Icons.refresh),
+                label: const Text('Conectar al servidor'),
+              ),
+            ],
           ],
         ),
       );
@@ -313,14 +439,44 @@ class _DeliveryManagementScreenState extends State<DeliveryManagementScreen>
 
     return RefreshIndicator(
       onRefresh: _loadData,
-      child: ListView.builder(
-        itemCount: _pendingOrders.length,
-        itemBuilder: (context, index) {
-          return OrderCard(
-            order: _pendingOrders[index],
-            onStatusChanged: _loadData,
-          );
-        },
+      child: Column(
+        children: [
+          // Header con información
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(16),
+            color: Colors.blue.shade50,
+            child: Row(
+              children: [
+                Icon(Icons.pending_actions, color: Colors.blue.shade700),
+                const SizedBox(width: 8),
+                Text(
+                  '${_pendingOrders.length} pedidos pendientes',
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    color: Colors.blue.shade700,
+                  ),
+                ),
+                const Spacer(),
+                if (_isConnectedToBackend)
+                  Icon(Icons.cloud_done, color: Colors.green.shade600, size: 20)
+                else
+                  Icon(Icons.cloud_off, color: Colors.orange.shade600, size: 20),
+              ],
+            ),
+          ),
+          Expanded(
+            child: ListView.builder(
+              itemCount: _pendingOrders.length,
+              itemBuilder: (context, index) {
+                return OrderCard(
+                  order: _pendingOrders[index],
+                  onStatusChanged: _loadData,
+                );
+              },
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -353,7 +509,9 @@ class _DeliveryManagementScreenState extends State<DeliveryManagementScreen>
                         child: ElevatedButton.icon(
                           onPressed: _pendingOrders.isNotEmpty ? _generateOptimalRoute : null,
                           icon: const Icon(Icons.auto_fix_high),
-                          label: const Text('Generar Ruta Óptima'),
+                          label: Text(_pendingOrders.isEmpty
+                              ? 'No hay pedidos pendientes'
+                              : 'Generar Ruta Óptima (${_pendingOrders.length} pedidos)'),
                         ),
                       ),
                     ],
@@ -372,11 +530,20 @@ class _DeliveryManagementScreenState extends State<DeliveryManagementScreen>
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        'Secuencia de Entregas',
-                        style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                          fontWeight: FontWeight.bold,
-                        ),
+                      Row(
+                        children: [
+                          Text(
+                            'Secuencia de Entregas',
+                            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          const Spacer(),
+                          Chip(
+                            label: Text('${_currentRoute!.orders.length} paradas'),
+                            backgroundColor: Colors.blue.shade100,
+                          ),
+                        ],
                       ),
                       const SizedBox(height: 16),
                       Expanded(
@@ -405,15 +572,25 @@ class _DeliveryManagementScreenState extends State<DeliveryManagementScreen>
                                     'Total: Bs. ${order.totalAmount.toStringAsFixed(2)}',
                                     style: const TextStyle(fontSize: 12),
                                   ),
+                                  // ✅ FIX: Verificar null safety para observations
+                                  if (order.observations != null && order.observations!.isNotEmpty)
+                                    Text(
+                                      'Obs: ${order.observations}',
+                                      style: TextStyle(
+                                        fontSize: 11,
+                                        color: Colors.grey[600],
+                                        fontStyle: FontStyle.italic,
+                                      ),
+                                    ),
                                 ],
                               ),
                               trailing: order.status == OrderStatus.entregado
                                   ? const Icon(Icons.check_circle, color: Colors.green)
                                   : IconButton(
-                                      onPressed: () => _markOrderAsDelivered(order),
-                                      icon: const Icon(Icons.check_circle_outline),
-                                      tooltip: 'Marcar como entregado',
-                                    ),
+                                onPressed: () => _markOrderAsDelivered(order),
+                                icon: const Icon(Icons.check_circle_outline),
+                                tooltip: 'Marcar como entregado',
+                              ),
                             );
                           },
                         ),
@@ -435,22 +612,29 @@ class _DeliveryManagementScreenState extends State<DeliveryManagementScreen>
     }
 
     final completedOrders = _allOrders.where((order) =>
-      order.status == OrderStatus.entregado ||
-      order.status == OrderStatus.noEntregado ||
-      order.status == OrderStatus.productoIncorrecto
+    order.status == OrderStatus.entregado ||
+        order.status == OrderStatus.noEntregado ||
+        order.status == OrderStatus.productoIncorrecto
     ).toList();
 
     if (completedOrders.isEmpty) {
-      return const Center(
+      return Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Icon(Icons.history, size: 64, color: Colors.grey),
-            SizedBox(height: 16),
-            Text(
+            const SizedBox(height: 16),
+            const Text(
               'No hay entregas completadas',
               style: TextStyle(fontSize: 18, color: Colors.grey),
             ),
+            if (!_isConnectedToBackend) ...[
+              const SizedBox(height: 8),
+              const Text(
+                'Conecta al servidor para ver el historial completo',
+                style: TextStyle(fontSize: 14, color: Colors.grey),
+              ),
+            ],
           ],
         ),
       );
@@ -458,14 +642,48 @@ class _DeliveryManagementScreenState extends State<DeliveryManagementScreen>
 
     return RefreshIndicator(
       onRefresh: _loadData,
-      child: ListView.builder(
-        itemCount: completedOrders.length,
-        itemBuilder: (context, index) {
-          return OrderCard(
-            order: completedOrders[index],
-            showActions: false,
-          );
-        },
+      child: Column(
+        children: [
+          // Header con estadísticas
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(16),
+            color: Colors.green.shade50,
+            child: Row(
+              children: [
+                Icon(Icons.history, color: Colors.green.shade700),
+                const SizedBox(width: 8),
+                Text(
+                  '${completedOrders.length} entregas completadas',
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    color: Colors.green.shade700,
+                  ),
+                ),
+                const Spacer(),
+                if (_stats != null)
+                  Text(
+                    'Hoy: ${_stats!.deliveredToday}',
+                    style: TextStyle(
+                      color: Colors.green.shade600,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          Expanded(
+            child: ListView.builder(
+              itemCount: completedOrders.length,
+              itemBuilder: (context, index) {
+                return OrderCard(
+                  order: completedOrders[index],
+                  showActions: false,
+                );
+              },
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -479,11 +697,16 @@ class _DeliveryManagementScreenState extends State<DeliveryManagementScreen>
       // Ubicación de inicio (centro de Santa Cruz)
       const startLocation = LatLng(-17.8146, -63.1561);
 
+      print('🗺️ Generando ruta óptima para ${_pendingOrders.length} pedidos...');
+
       final routeOptimizationService = RouteOptimizationService();
       final route = await routeOptimizationService.optimizeDeliveryRoute(
         startLocation: startLocation,
         orders: _pendingOrders,
       );
+
+      print('✅ Ruta generada: ${route.totalDistance.toStringAsFixed(2)} km, '
+          '${route.estimatedDuration} minutos');
 
       // Actualizar estado de pedidos a "en ruta"
       for (final order in _pendingOrders) {
@@ -503,9 +726,16 @@ class _DeliveryManagementScreenState extends State<DeliveryManagementScreen>
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Ruta óptima generada correctamente'),
+          SnackBar(
+            content: Text(
+                'Ruta óptima generada: ${route.orders.length} paradas, '
+                    '${route.totalDistance.toStringAsFixed(1)} km'
+            ),
             backgroundColor: Colors.green,
+            action: SnackBarAction(
+              label: 'Ver Ruta',
+              onPressed: () => _tabController.animateTo(2),
+            ),
           ),
         );
       }
@@ -513,12 +743,17 @@ class _DeliveryManagementScreenState extends State<DeliveryManagementScreen>
       // Recargar datos
       await _loadData();
     } catch (e) {
+      print('❌ Error al generar ruta: $e');
       setState(() => _isLoading = false);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Error al generar ruta: $e'),
             backgroundColor: Colors.red,
+            action: SnackBarAction(
+              label: 'Reintentar',
+              onPressed: _generateOptimalRoute,
+            ),
           ),
         );
       }
@@ -527,6 +762,8 @@ class _DeliveryManagementScreenState extends State<DeliveryManagementScreen>
 
   Future<void> _markOrderAsDelivered(Order order) async {
     try {
+      print('📦 Marcando pedido ${order.id} como entregado...');
+
       await _deliveryService.updateOrderStatus(order.id, OrderStatus.entregado);
 
       if (mounted) {
@@ -541,6 +778,7 @@ class _DeliveryManagementScreenState extends State<DeliveryManagementScreen>
       // Recargar datos para actualizar la interfaz
       await _loadData();
     } catch (e) {
+      print('❌ Error al actualizar pedido: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
