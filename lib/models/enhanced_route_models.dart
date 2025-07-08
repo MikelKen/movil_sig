@@ -49,6 +49,23 @@ class RouteStopInfo {
     }
   }
 
+  // Helper para conversión segura de tipos
+  static int _safeParseInt(dynamic value) {
+    if (value == null) return 0;
+    if (value is int) return value;
+    if (value is double) return value.round();
+    if (value is String) return int.tryParse(value) ?? 0;
+    return 0;
+  }
+
+  static double _safeParseDouble(dynamic value) {
+    if (value == null) return 0.0;
+    if (value is double) return value;
+    if (value is int) return value.toDouble();
+    if (value is String) return double.tryParse(value) ?? 0.0;
+    return 0.0;
+  }
+
   // Serialización
   Map<String, dynamic> toJson() {
     return {
@@ -88,35 +105,35 @@ class RouteStopInfo {
   factory RouteStopInfo.fromJson(Map<String, dynamic> json) {
     final orderData = json['order'] as Map<String, dynamic>;
     return RouteStopInfo(
-      sequence: json['sequence'],
+      sequence: _safeParseInt(json['sequence']),
       order: Order(
-        id: orderData['id'],
-        clientName: orderData['clientName'],
-        clientPhone: orderData['clientPhone'],
+        id: orderData['id']?.toString() ?? '',
+        clientName: orderData['clientName']?.toString() ?? '',
+        clientPhone: orderData['clientPhone']?.toString() ?? '',
         deliveryLocation: LatLng(
-          orderData['deliveryLocation']['latitude'],
-          orderData['deliveryLocation']['longitude'],
+          _safeParseDouble(orderData['deliveryLocation']['latitude']),
+          _safeParseDouble(orderData['deliveryLocation']['longitude']),
         ),
-        address: orderData['address'],
-        items: (orderData['items'] as List).map((item) => OrderItem(
-          id: item['id'],
-          name: item['name'],
-          quantity: item['quantity'],
-          price: item['price'],
+        address: orderData['address']?.toString() ?? '',
+        items: (orderData['items'] as List? ?? []).map((item) => OrderItem(
+          id: item['id']?.toString() ?? '',
+          name: item['name']?.toString() ?? '',
+          quantity: _safeParseInt(item['quantity']),
+          price: _safeParseDouble(item['price']),
         )).toList(),
-        status: OrderStatus.values[orderData['status']],
-        createdAt: DateTime.parse(orderData['createdAt']),
-        observations: orderData['observations'],
-        totalAmount: orderData['totalAmount'],
+        status: OrderStatus.values[_safeParseInt(orderData['status'])],
+        createdAt: DateTime.tryParse(orderData['createdAt']?.toString() ?? '') ?? DateTime.now(),
+        observations: orderData['observations']?.toString() ?? '',
+        totalAmount: _safeParseDouble(orderData['totalAmount']),
       ),
-      distanceFromStart: json['distanceFromStart'].toDouble(),
-      distanceFromPrevious: json['distanceFromPrevious'].toDouble(),
-      cumulativeTime: json['cumulativeTime'],
-      timeFromPrevious: json['timeFromPrevious'],
-      estimatedArrival: DateTime.parse(json['estimatedArrival']),
+      distanceFromStart: _safeParseDouble(json['distanceFromStart']),
+      distanceFromPrevious: _safeParseDouble(json['distanceFromPrevious']),
+      cumulativeTime: _safeParseInt(json['cumulativeTime']),
+      timeFromPrevious: _safeParseInt(json['timeFromPrevious']),
+      estimatedArrival: DateTime.tryParse(json['estimatedArrival']?.toString() ?? '') ?? DateTime.now(),
       location: LatLng(
-        json['location']['latitude'],
-        json['location']['longitude'],
+        _safeParseDouble(json['location']['latitude']),
+        _safeParseDouble(json['location']['longitude']),
       ),
     );
   }
@@ -143,6 +160,40 @@ class EnhancedDeliveryRoute extends DeliveryRoute {
     super.isOptimized = false,
     required this.plannedStartTime,
   });
+
+  // Helper para conversión segura de tipos
+  static int _safeParseInt(dynamic value) {
+    if (value == null) return 0;
+    if (value is int) return value;
+    if (value is double) return value.round();
+    if (value is String) return int.tryParse(value) ?? 0;
+    return 0;
+  }
+
+  static double _safeParseDouble(dynamic value) {
+    if (value == null) return 0.0;
+    if (value is double) return value;
+    if (value is int) return value.toDouble();
+    if (value is String) return double.tryParse(value) ?? 0.0;
+    return 0.0;
+  }
+
+  static DateTime _safeParseDateTime(dynamic value, {DateTime? fallback}) {
+    if (value == null) return fallback ?? DateTime.now();
+
+    // Si es un timestamp en milisegundos
+    if (value is int) {
+      return DateTime.fromMillisecondsSinceEpoch(value);
+    }
+
+    // Si es un string ISO8601
+    if (value is String) {
+      final parsed = DateTime.tryParse(value);
+      if (parsed != null) return parsed;
+    }
+
+    return fallback ?? DateTime.now();
+  }
 
   // Getters adicionales para la ruta mejorada
   DateTime get estimatedEndTime {
@@ -171,60 +222,71 @@ class EnhancedDeliveryRoute extends DeliveryRoute {
   }
 
   factory EnhancedDeliveryRoute.fromJson(Map<String, dynamic> json) {
-    return EnhancedDeliveryRoute(
-      id: json['id'],
-      orders: (json['orders'] as List).map((o) => Order(
-        id: o['id'],
-        clientName: o['clientName'],
-        clientPhone: o['clientPhone'],
-        deliveryLocation: LatLng(
-          o['deliveryLocation']['latitude'],
-          o['deliveryLocation']['longitude'],
-        ),
-        address: o['address'],
-        items: (o['items'] as List).map((item) => OrderItem(
-          id: item['id'],
-          name: item['name'],
-          quantity: item['quantity'],
-          price: item['price'],
+    try {
+      print('🔍 Deserializando EnhancedDeliveryRoute: ${json.keys}');
+
+      return EnhancedDeliveryRoute(
+        id: json['id']?.toString() ?? '',
+        orders: (json['orders'] as List? ?? []).map((o) => Order(
+          id: o['id']?.toString() ?? '',
+          clientName: o['clientName']?.toString() ?? '',
+          clientPhone: o['clientPhone']?.toString() ?? '',
+          deliveryLocation: LatLng(
+            _safeParseDouble(o['deliveryLocation']['latitude']),
+            _safeParseDouble(o['deliveryLocation']['longitude']),
+          ),
+          address: o['address']?.toString() ?? '',
+          items: (o['items'] as List? ?? []).map((item) => OrderItem(
+            id: item['id']?.toString() ?? '',
+            name: item['name']?.toString() ?? '',
+            quantity: _safeParseInt(item['quantity']),
+            price: _safeParseDouble(item['price']),
+          )).toList(),
+          status: OrderStatus.values[_safeParseInt(o['status'])],
+          createdAt: _safeParseDateTime(o['createdAt']),
+          deliveryTime: o['deliveryTime'] != null
+              ? _safeParseDateTime(o['deliveryTime'])
+              : null,
+          observations: o['observations']?.toString() ?? '',
+          totalAmount: _safeParseDouble(o['totalAmount']),
         )).toList(),
-        status: OrderStatus.values[o['status']],
-        createdAt: DateTime.fromMillisecondsSinceEpoch(o['createdAt']),
-        deliveryTime: o['deliveryTime'] != null
-            ? DateTime.fromMillisecondsSinceEpoch(o['deliveryTime'])
+        stopInfos: (json['stopInfos'] as List? ?? [])
+            .map((stop) => RouteStopInfo.fromJson(stop))
+            .toList(),
+        polylinePoints: (json['polylinePoints'] as List? ?? []).map((p) =>
+            LatLng(
+                _safeParseDouble(p['latitude']),
+                _safeParseDouble(p['longitude'])
+            )
+        ).toList(),
+        startLocation: LatLng(
+          _safeParseDouble(json['startLocation']['latitude']),
+          _safeParseDouble(json['startLocation']['longitude']),
+        ),
+        endLocation: json['endLocation'] != null ? LatLng(
+            _safeParseDouble(json['endLocation']['latitude']),
+            _safeParseDouble(json['endLocation']['longitude'])
+        ) : null,
+        createdAt: _safeParseDateTime(json['createdAt']),
+        startTime: json['startTime'] != null
+            ? _safeParseDateTime(json['startTime'])
             : null,
-        observations: o['observations'],
-        totalAmount: o['totalAmount'],
-      )).toList(),
-      stopInfos: (json['stopInfos'] as List?)
-          ?.map((stop) => RouteStopInfo.fromJson(stop))
-          .toList() ?? [],
-      polylinePoints: (json['polylinePoints'] as List?)?.map((p) =>
-          LatLng(p['latitude'], p['longitude'])
-      ).toList() ?? [],
-      startLocation: LatLng(
-        json['startLocation']['latitude'],
-        json['startLocation']['longitude'],
-      ),
-      endLocation: json['endLocation'] != null ? LatLng(
-          json['endLocation']['latitude'],
-          json['endLocation']['longitude']
-      ) : null,
-      createdAt: DateTime.fromMillisecondsSinceEpoch(json['createdAt']),
-      startTime: json['startTime'] != null
-          ? DateTime.fromMillisecondsSinceEpoch(json['startTime'])
-          : null,
-      endTime: json['endTime'] != null
-          ? DateTime.fromMillisecondsSinceEpoch(json['endTime'])
-          : null,
-      totalDistance: json['totalDistance'].toDouble(),
-      estimatedDuration: json['estimatedDuration'],
-      optimizationMethod: json['optimizationMethod'] ?? 'Enhanced',
-      isOptimized: json['isOptimized'] ?? false,
-      plannedStartTime: json['plannedStartTime'] != null
-          ? DateTime.parse(json['plannedStartTime'])
-          : DateTime.fromMillisecondsSinceEpoch(json['createdAt']),
-    );
+        endTime: json['endTime'] != null
+            ? _safeParseDateTime(json['endTime'])
+            : null,
+        totalDistance: _safeParseDouble(json['totalDistance']),
+        estimatedDuration: _safeParseInt(json['estimatedDuration']),
+        optimizationMethod: json['optimizationMethod']?.toString() ?? 'Enhanced',
+        isOptimized: json['isOptimized'] == true,
+        plannedStartTime: json['plannedStartTime'] != null
+            ? _safeParseDateTime(json['plannedStartTime'])
+            : _safeParseDateTime(json['createdAt']),
+      );
+    } catch (e) {
+      print('❌ Error deserializando EnhancedDeliveryRoute: $e');
+      print('📄 JSON problemático: $json');
+      rethrow;
+    }
   }
 
   @override

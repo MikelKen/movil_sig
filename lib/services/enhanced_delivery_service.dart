@@ -144,12 +144,43 @@ class EnhancedDeliveryService {
   Future<List<EnhancedDeliveryRoute>> getEnhancedRoutes() async {
     try {
       await _initStorage();
-      final data = await _storage.getData(_enhancedRoutesKey);
-      if (data == null) return [];
+      print('📦 Obteniendo rutas mejoradas...');
 
-      return (data as List).map((json) => EnhancedDeliveryRoute.fromJson(json)).toList();
+      final data = await _storage.getData(_enhancedRoutesKey);
+      print('📄 Datos obtenidos: ${data != null ? 'Sí' : 'No'}');
+
+      if (data == null) {
+        print('ℹ️ No hay rutas guardadas');
+        return [];
+      }
+
+      print('🔢 Procesando ${(data as List).length} rutas...');
+
+      final routes = <EnhancedDeliveryRoute>[];
+
+      for (int i = 0; i < (data as List).length; i++) {
+        try {
+          final routeJson = data[i] as Map<String, dynamic>;
+          print('🔍 Procesando ruta $i: ${routeJson['id']}');
+
+          final route = EnhancedDeliveryRoute.fromJson(routeJson);
+          routes.add(route);
+
+          print('✅ Ruta $i procesada exitosamente');
+        } catch (e) {
+          print('❌ Error procesando ruta $i: $e');
+          print('📄 JSON problemático: ${data[i]}');
+          // Continuar con las siguientes rutas en lugar de fallar completamente
+          continue;
+        }
+      }
+
+      print('🎯 ${routes.length} rutas cargadas exitosamente');
+      return routes;
+
     } catch (e) {
-      print('❌ Error al obtener rutas mejoradas: $e');
+      print('❌ Error general al obtener rutas mejoradas: $e');
+      print('Stack trace: ${StackTrace.current}');
       return [];
     }
   }

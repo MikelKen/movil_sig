@@ -788,9 +788,7 @@ class _DeliveryManagementScreenState extends State<DeliveryManagementScreen>
                               : const Icon(Icons.auto_fix_high),
                           label: Text(_isOptimizing
                               ? 'Optimizando...'
-                              : _enhancedCurrentRoute != null
-                              ? 'Re-optimizar Ruta'
-                              : 'Optimizar Ruta'),
+                              : 'Orden de Pedidos'),
                           style: ElevatedButton.styleFrom(
                             backgroundColor: Colors.deepPurple,
                             foregroundColor: Colors.white,
@@ -815,52 +813,7 @@ class _DeliveryManagementScreenState extends State<DeliveryManagementScreen>
                     ],
                   ),
 
-                  // Nuevo indicador visual del estado
-                  const SizedBox(height: 12),
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                      color: _enhancedCurrentRoute != null
-                          ? Colors.green.shade50
-                          : Colors.blue.shade50,
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(
-                        color: _enhancedCurrentRoute != null
-                            ? Colors.green.shade200
-                            : Colors.blue.shade200,
-                      ),
-                    ),
-                    child: Row(
-                      children: [
-                        Icon(
-                          _enhancedCurrentRoute != null
-                              ? Icons.check_circle
-                              : Icons.info,
-                          color: _enhancedCurrentRoute != null
-                              ? Colors.green.shade700
-                              : Colors.blue.shade700,
-                          size: 16,
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            _enhancedCurrentRoute != null
-                                ? 'Ruta optimizada lista para visualizar en el mapa'
-                                : _pendingOrders.isNotEmpty
-                                ? 'Al ir al mapa, puedes optimizar automáticamente ${_pendingOrders.length} pedidos'
-                                : 'No hay pedidos pendientes para optimizar',
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: _enhancedCurrentRoute != null
-                                  ? Colors.green.shade700
-                                  : Colors.blue.shade700,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
+
                 ],
               ),
             ),
@@ -1089,44 +1042,7 @@ class _DeliveryManagementScreenState extends State<DeliveryManagementScreen>
                         ),
                         textAlign: TextAlign.center,
                       ),
-                      if (_pendingOrders.isNotEmpty) ...[
-                        const SizedBox(height: 16),
-                        Row(
-                          children: [
-                            Expanded(
-                              child: ElevatedButton.icon(
-                                onPressed: _isOptimizing ? null : _optimizeRoute,
-                                icon: _isOptimizing
-                                    ? const SizedBox(
-                                  width: 16,
-                                  height: 16,
-                                  child: CircularProgressIndicator(strokeWidth: 2),
-                                )
-                                    : const Icon(Icons.auto_fix_high),
-                                label: Text(_isOptimizing
-                                    ? 'Optimizando...'
-                                    : 'Optimizar ${_pendingOrders.length} pedidos'),
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: Colors.deepPurple,
-                                  foregroundColor: Colors.white,
-                                ),
-                              ),
-                            ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: ElevatedButton.icon(
-                                onPressed: _navigateToRouteMap,
-                                icon: const Icon(Icons.map),
-                                label: const Text('Ir al Mapa'),
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: Colors.blue,
-                                  foregroundColor: Colors.white,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
+
                     ],
                   ),
                 ),
@@ -1516,109 +1432,4 @@ class _DeliveryManagementScreenState extends State<DeliveryManagementScreen>
     );
   }
 
-  Future<void> _generateOptimalRoute() async {
-    if (_pendingOrders.isEmpty) return;
-
-    setState(() => _isLoading = true);
-
-    try {
-      // Ubicación de inicio (centro de Santa Cruz)
-      const startLocation = LatLng(-17.8146, -63.1561);
-
-      print('🗺️ Generando ruta óptima para ${_pendingOrders.length} pedidos...');
-
-      final routeOptimizationService = RouteOptimizationService();
-      final route = await routeOptimizationService.optimizeDeliveryRoute(
-        startLocation: startLocation,
-        orders: _pendingOrders,
-      );
-
-      print('✅ Ruta generada: ${route.totalDistance.toStringAsFixed(2)} km, '
-          '${route.estimatedDuration} minutos');
-
-      // Actualizar estado de pedidos a "en ruta"
-      for (final order in _pendingOrders) {
-        await _deliveryService.updateOrderStatus(order.id, OrderStatus.enRuta);
-      }
-
-      // Guardar la ruta
-      await _deliveryService.saveRoute(route);
-
-      setState(() {
-        _currentRoute = route;
-        _isLoading = false;
-      });
-
-      // Cambiar a la pestaña de ruta óptima
-      _tabController.animateTo(2);
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-                'Ruta óptima generada: ${route.orders.length} paradas, '
-                    '${route.totalDistance.toStringAsFixed(1)} km'
-            ),
-            backgroundColor: Colors.green,
-            action: SnackBarAction(
-              label: 'Ver Ruta',
-              onPressed: () => _tabController.animateTo(2),
-            ),
-          ),
-        );
-      }
-
-      // Recargar datos
-      await _loadData();
-    } catch (e) {
-      print('❌ Error al generar ruta: $e');
-      setState(() => _isLoading = false);
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error al generar ruta: $e'),
-            backgroundColor: Colors.red,
-            action: SnackBarAction(
-              label: 'Reintentar',
-              onPressed: _generateOptimalRoute,
-            ),
-          ),
-        );
-      }
-    }
-  }
-
-  Future<void> _markOrderAsDelivered(Order order) async {
-    try {
-      print('📦 Marcando pedido ${order.id} como entregado...');
-
-      await _deliveryService.updateOrderStatus(order.id, OrderStatus.entregado);
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Pedido de ${order.clientName} marcado como entregado'),
-            backgroundColor: Colors.green,
-          ),
-        );
-      }
-
-      // Recargar datos para actualizar la interfaz
-      await _loadData();
-    } catch (e) {
-      print('❌ Error al actualizar pedido: $e');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error al actualizar pedido: $e'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
-    }
-  }
-
-  String _formatTime(DateTime dateTime) {
-    return '${dateTime.hour.toString().padLeft(2, '0')}:${dateTime.minute.toString().padLeft(2, '0')}';
-  }
 }

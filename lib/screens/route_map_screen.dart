@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:sig/models/enhanced_route_models.dart';
-import '../models/delivery_route.dart';
 import '../models/order.dart';
 import '../services/enhanced_route_optimization_service.dart';
 import '../services/enhanced_delivery_service.dart';
@@ -77,7 +76,6 @@ class _RouteMapScreenState extends State<RouteMapScreen> {
 
         _showMessage('Ruta optimizada cargada automáticamente');
       } else {
-        // Si no hay ruta optimizada, mostrar solo los marcadores
         _updateMarkersWithoutRoute();
       }
 
@@ -144,13 +142,11 @@ class _RouteMapScreenState extends State<RouteMapScreen> {
       ),
     ).then((_) {
       if (mounted) {
-        // **MODIFICADO**: Recargar solo datos básicos, mantener ruta si existe
         _reloadBasicData();
       }
     });
   }
 
-  // **NUEVO**: Método para recargar solo datos básicos sin perder la ruta
   Future<void> _reloadBasicData() async {
     try {
       // Actualizar pedidos pendientes
@@ -1185,40 +1181,6 @@ class _RouteMapScreenState extends State<RouteMapScreen> {
                   ),
                 ),
 
-                // Botón para actualizar ubicación
-                Container(
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(isTablet ? 20 : 16),
-                    boxShadow: [
-                      BoxShadow(
-                        color: theme.colorScheme.shadow.withOpacity(0.3),
-                        blurRadius: 8,
-                        offset: const Offset(0, 4),
-                      ),
-                    ],
-                  ),
-                  child: FloatingActionButton(
-                    heroTag: "update_location",
-                    onPressed: _isLoadingLocation ? null : _updateCurrentLocation,
-                    backgroundColor: theme.colorScheme.tertiary,
-                    foregroundColor: theme.colorScheme.onTertiary,
-                    elevation: 0,
-                    tooltip: 'Actualizar Ubicación',
-                    child: _isLoadingLocation
-                        ? SizedBox(
-                      width: isTablet ? 24 : 20,
-                      height: isTablet ? 24 : 20,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: theme.colorScheme.onTertiary,
-                      ),
-                    )
-                        : Icon(
-                      Icons.gps_fixed,
-                      size: isTablet ? 28 : 24,
-                    ),
-                  ),
-                ),
               ],
             ),
           ),
@@ -1269,18 +1231,7 @@ class _RouteMapScreenState extends State<RouteMapScreen> {
                     ),
                   ],
                 ),
-                child: FloatingActionButton(
-                  heroTag: "route_details",
-                  onPressed: _showRouteDetailPanel,
-                  backgroundColor: Colors.purple,
-                  foregroundColor: Colors.white,
-                  elevation: 0,
-                  tooltip: 'Ver Secuencia de Entregas',
-                  child: Icon(
-                    Icons.format_list_numbered,
-                    size: isTablet ? 28 : 24,
-                  ),
-                ),
+
               ),
             ),
 
@@ -1398,11 +1349,17 @@ class _RouteMapScreenState extends State<RouteMapScreen> {
             : const Icon(Icons.auto_fix_high),
         label: Text(_isOptimizing
             ? 'Optimizando...'
-            : _optimizedRoute != null
-            ? 'Re-optimizar Ruta'
-            : 'Optimizar Ruta Avanzada'),
+            : 'Optimizar Ruta'),
         backgroundColor: Colors.deepPurple,
         foregroundColor: Colors.white,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+        ),
+        // Aumenta el padding interno
+        extendedPadding: const EdgeInsets.symmetric(
+          horizontal: 24, // Más ancho
+          vertical: 10,   // Más alto
+        ),
       ),
     );
   }
