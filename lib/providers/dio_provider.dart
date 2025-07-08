@@ -1,5 +1,13 @@
 import 'package:dio/dio.dart';
 
+enum PaymentMethod {
+  qr,
+  transferenciaBancaria,
+  efectivo,
+  tarjetaCredito,
+  transferencia,
+}
+
 class DioProvider {
   static const String _baseUrl = 'http://192.168.100.9:3000';
   late Dio _dio;
@@ -73,9 +81,6 @@ class DioProvider {
       final response = await _dio.get('/orders/pending');
 
       if (response.statusCode == 200 && response.data is List) {
-        print("===================================");
-        print(response);
-        print("=====================================");
         final List<Map<String, dynamic>> orders = response.data
             .map<Map<String, dynamic>>((item) => item as Map<String, dynamic>)
             .toList();
@@ -103,14 +108,15 @@ class DioProvider {
     try {
       print('🔄 Actualizando pedido $orderId a estado: $status');
 
+
       final data = {
         'status': status,
         if (paymentMethod != null) 'paymentMethod': paymentMethod,
         if (observations != null) 'observations': observations,
         if (status == 'entregado') 'deliveryTime': DateTime.now().toIso8601String(),
       };
-
-      final response = await _dio.put('/orders/$orderId/status', data: data);
+      print('datos============================ : $data' );
+      final response = await _dio.patch('/orders/$orderId/status', data: data);
 
       if (response.statusCode == 200) {
         print('✅ Estado del pedido actualizado exitosamente');

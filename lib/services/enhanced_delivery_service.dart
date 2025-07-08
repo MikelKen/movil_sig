@@ -379,16 +379,10 @@ class EnhancedDeliveryService {
     switch (paymentMethod.toLowerCase()) {
       case 'efectivo':
         return PaymentMethod.efectivo;
-      case 'tarjeta_credito':
-      case 'tarjetacredito':
-        return PaymentMethod.tarjetaCredito;
       case 'transferencia':
         return PaymentMethod.transferencia;
       case 'qr':
         return PaymentMethod.qr;
-      case 'transferencia_bancaria':
-      case 'transferenciabancaria':
-        return PaymentMethod.transferenciaBancaria;
       default:
         return PaymentMethod.efectivo;
     }
@@ -534,7 +528,7 @@ class EnhancedDeliveryService {
           OrderItem(id: '4', name: 'Puma RS-X3', quantity: 1, price: 380),
         ],
         status: OrderStatus.pendiente,
-        paymentMethod: PaymentMethod.tarjetaCredito,
+        paymentMethod: PaymentMethod.transferencia,
         createdAt: DateTime.now().subtract(Duration(hours: 1)),
         deliveryTime: null,
         observations: 'Edificio azul, 2do piso',

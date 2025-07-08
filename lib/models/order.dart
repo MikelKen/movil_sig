@@ -10,9 +10,7 @@ enum OrderStatus {
 
 enum PaymentMethod {
   qr,
-  transferenciaBancaria,
   efectivo,
-  tarjetaCredito,
   transferencia,
 }
 
@@ -86,13 +84,9 @@ class Order {
     if (paymentMethod == null) return 'No especificado';
     switch (paymentMethod!) {
       case PaymentMethod.qr:
-        return 'QR';
-      case PaymentMethod.transferenciaBancaria:
-        return 'Transferencia Bancaria';
+        return 'QR';;
       case PaymentMethod.efectivo:
         return 'Efectivo';
-      case PaymentMethod.tarjetaCredito:
-        return 'Tarjeta de Crédito';
       case PaymentMethod.transferencia:
         return 'Transferencia';
     }
