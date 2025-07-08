@@ -1,11 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:sig/providers/dio_provider.dart';
+import 'package:sig/models/enhanced_route_models.dart';
+import 'package:sig/services/route_optimization_service.dart';
 import '../models/order.dart';
 import '../models/delivery_route.dart';
-import '../services/delivery_service.dart';
-import '../services/route_optimization_service.dart';
+import '../services/delivery_service.dart' hide DeliveryStats;
+import '../services/enhanced_delivery_service.dart';
+import '../services/enhanced_route_optimization_service.dart'; // Agregado
+import '../services/location_service.dart'; // Agregado
 import '../widgets/order_card.dart';
+import 'route_map_screen.dart';
 
 class DeliveryManagementScreen extends StatefulWidget {
   const DeliveryManagementScreen({super.key});
@@ -18,26 +23,53 @@ class _DeliveryManagementScreenState extends State<DeliveryManagementScreen>
     with SingleTickerProviderStateMixin {
   late TabController _tabController;
   final DeliveryService _deliveryService = DeliveryService();
+  final EnhancedDeliveryService _enhancedDeliveryService = EnhancedDeliveryService();
+  final EnhancedRouteOptimizationService _routeService = EnhancedRouteOptimizationService(); // Agregado
+  final LocationService _locationService = LocationService(); // Agregado
   final DioProvider _dioProvider = DioProvider();
 
   List<Order> _allOrders = [];
   List<Order> _pendingOrders = [];
   DeliveryRoute? _currentRoute;
+  EnhancedDeliveryRoute? _enhancedCurrentRoute;
   DeliveryStats? _stats;
   bool _isLoading = true;
   bool _isConnectedToBackend = false;
+  bool _isOptimizing = false; // Agregado
+  LatLng? _currentLocation; // Agregado
 
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 4, vsync: this);
     _loadData();
+    _getCurrentLocation(); // Agregado
   }
 
   @override
   void dispose() {
     _tabController.dispose();
     super.dispose();
+  }
+
+  // Agregado: Obtener ubicación actual
+  Future<void> _getCurrentLocation() async {
+    try {
+      final locationData = await _locationService.getCurrentLocation();
+      if (locationData != null) {
+        setState(() {
+          _currentLocation = LatLng(locationData.latitude!, locationData.longitude!);
+        });
+      } else {
+        setState(() {
+          _currentLocation = const LatLng(-17.8146, -63.1561); // Santa Cruz por defecto
+        });
+      }
+    } catch (e) {
+      setState(() {
+        _currentLocation = const LatLng(-17.8146, -63.1561);
+      });
+    }
   }
 
   Future<void> _loadData() async {
@@ -55,18 +87,27 @@ class _DeliveryManagementScreenState extends State<DeliveryManagementScreen>
 
         // Procesar los pedidos del backend
         await _deliveryService.loadOrdersFromBackend(ordersFromApi);
+        await _enhancedDeliveryService.loadOrdersFromBackend(ordersFromApi);
 
         // Obtener los pedidos ya procesados
         final orders = await _deliveryService.getOrders();
         final pendingOrders = await _deliveryService.getPendingOrders();
-        final stats = await _deliveryService.getDeliveryStats();
+        final stats = await _enhancedDeliveryService.getDeliveryStats();
+
+        // **MODIFICADO**: Siempre cargar ruta mejorada si existe
+        final enhancedRoute = await _enhancedDeliveryService.getActiveEnhancedRoute();
 
         setState(() {
           _allOrders = orders;
           _pendingOrders = pendingOrders;
           _stats = stats;
+          _enhancedCurrentRoute = enhancedRoute; // Esto se actualiza siempre
           _isLoading = false;
         });
+
+        if (enhancedRoute != null) {
+          print('📍 Ruta optimizada cargada en gestión: ${enhancedRoute.id}');
+        }
 
         print('📊 Estadísticas: ${stats.totalOrders} total, ${stats.pendingOrders} pendientes');
       } else {
@@ -76,14 +117,22 @@ class _DeliveryManagementScreenState extends State<DeliveryManagementScreen>
         // Fallback a datos locales
         final orders = await _deliveryService.getOrders();
         final pendingOrders = await _deliveryService.getPendingOrders();
-        final stats = await _deliveryService.getDeliveryStats();
+        final stats = await _enhancedDeliveryService.getDeliveryStats();
+
+        // **MODIFICADO**: Siempre cargar ruta mejorada si existe
+        final enhancedRoute = await _enhancedDeliveryService.getActiveEnhancedRoute();
 
         setState(() {
           _allOrders = orders;
           _pendingOrders = pendingOrders;
           _stats = stats;
+          _enhancedCurrentRoute = enhancedRoute; // Esto se actualiza siempre
           _isLoading = false;
         });
+
+        if (enhancedRoute != null) {
+          print('📍 Ruta optimizada cargada (local) en gestión: ${enhancedRoute.id}');
+        }
 
         print('📱 Usando datos locales: ${orders.length} pedidos');
       }
@@ -103,6 +152,271 @@ class _DeliveryManagementScreenState extends State<DeliveryManagementScreen>
           ),
         );
       }
+    }
+  }
+
+  // Agregado: Optimizar ruta desde DeliveryManagementScreen
+  Future<void> _optimizeRoute() async {
+    if (_pendingOrders.isEmpty) {
+      _showMessage('No hay órdenes pendientes para optimizar', isError: true);
+      return;
+    }
+
+    if (!_routeService.isApiKeyConfigured()) {
+      _showMessage('API Key de Google Maps no configurada', isError: true);
+      return;
+    }
+
+    if (_currentLocation == null) {
+      _showMessage('No se pudo obtener la ubicación actual', isError: true);
+      return;
+    }
+
+    setState(() {
+      _isOptimizing = true;
+    });
+
+    try {
+      // Mostrar diálogo para seleccionar hora de inicio
+      final startTime = await _showStartTimeDialog();
+      if (startTime == null) {
+        setState(() => _isOptimizing = false);
+        return;
+      }
+
+      final optimizedRoute = await _routeService.optimizeDeliveryRouteEnhanced(
+        startLocation: _currentLocation!,
+        orders: _pendingOrders,
+        startTime: startTime,
+      );
+
+      // Guardar la ruta optimizada
+      await _enhancedDeliveryService.saveEnhancedRoute(optimizedRoute);
+
+      setState(() {
+        _enhancedCurrentRoute = optimizedRoute;
+        _isOptimizing = false;
+      });
+
+      _showMessage('Ruta optimizada generada exitosamente');
+
+      // Cambiar a la pestaña de ruta óptima para mostrar el resultado
+      _tabController.animateTo(2);
+    } catch (e) {
+      setState(() {
+        _isOptimizing = false;
+      });
+      _showMessage('Error al optimizar ruta: $e', isError: true);
+    }
+  }
+
+  // Agregado: Diálogo para seleccionar hora de inicio
+  Future<DateTime?> _showStartTimeDialog() async {
+    final now = DateTime.now();
+    final selectedTime = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay.fromDateTime(now),
+      helpText: 'Selecciona hora de inicio',
+    );
+
+    if (selectedTime != null) {
+      return DateTime(
+        now.year,
+        now.month,
+        now.day,
+        selectedTime.hour,
+        selectedTime.minute,
+      );
+    }
+    return null;
+  }
+
+  // Agregado: Navegar al mapa con ruta ya optimizada
+  void _navigateToRouteMapWithOptimizedRoute() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => const RouteMapScreen(),
+      ),
+    ).then((_) {
+      if (mounted) {
+        // Solo recargar datos básicos para mantener el estado de la ruta
+        _reloadRouteData();
+      }
+    });
+  }
+
+  Future<void> _reloadRouteData() async {
+    try {
+      final currentRoute = await _enhancedDeliveryService.getActiveEnhancedRoute();
+      if (currentRoute != null && currentRoute.id == _enhancedCurrentRoute?.id) {
+        // La ruta sigue siendo la misma, mantener estado
+        print('✅ Estado de ruta mantenido después de regresar del mapa');
+      } else if (currentRoute != null) {
+        // Hay una ruta nueva o actualizada
+        setState(() {
+          _enhancedCurrentRoute = currentRoute;
+        });
+        print('🔄 Ruta actualizada después de regresar del mapa');
+      } else {
+        // No hay ruta
+        setState(() {
+          _enhancedCurrentRoute = null;
+        });
+        print('🧹 Ruta eliminada después de regresar del mapa');
+      }
+
+      // Actualizar pedidos pendientes por si han cambiado
+      final pendingOrders = await _enhancedDeliveryService.getPendingOrders();
+      setState(() {
+        _pendingOrders = pendingOrders;
+      });
+    } catch (e) {
+      print('❌ Error recargando datos de ruta: $e');
+    }
+  }
+
+  // Navegar a la pantalla del mapa
+  void _navigateToRouteMap() async {
+    // Si no hay ruta optimizada y hay pedidos pendientes, optimizar automáticamente
+    if (_enhancedCurrentRoute == null && _pendingOrders.isNotEmpty) {
+      final shouldOptimize = await _showOptimizeConfirmationDialog();
+
+      if (shouldOptimize == true) {
+        // Optimizar ruta antes de ir al mapa
+        await _optimizeRouteForMap();
+      }
+    }
+
+    // Navegar al mapa (con o sin optimización)
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => const RouteMapScreen(),
+      ),
+    ).then((_) {
+      // Recargar datos cuando regrese del mapa
+      _loadData();
+    });
+  }
+
+  // Agregado: Mostrar mensaje
+  void _showMessage(String message, {bool isError = false}) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: isError ? Colors.red : Colors.green,
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
+
+  // Nuevo método para mostrar diálogo de confirmación de optimización
+  Future<bool?> _showOptimizeConfirmationDialog() async {
+    return showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Optimizar Ruta'),
+        content: Text(
+            'No hay ruta optimizada. ¿Deseas optimizar automáticamente los ${_pendingOrders.length} pedidos pendientes antes de ir al mapa?'
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Solo ir al Mapa'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.deepPurple,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('Optimizar y ir al Mapa'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // Nuevo método para optimizar ruta específicamente antes de ir al mapa
+  Future<void> _optimizeRouteForMap() async {
+    if (_pendingOrders.isEmpty) {
+      _showMessage('No hay órdenes pendientes para optimizar', isError: true);
+      return;
+    }
+
+    if (!_routeService.isApiKeyConfigured()) {
+      _showMessage('API Key de Google Maps no configurada', isError: true);
+      return;
+    }
+
+    if (_currentLocation == null) {
+      _showMessage('No se pudo obtener la ubicación actual', isError: true);
+      return;
+    }
+
+    // Mostrar loading dialog
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => const AlertDialog(
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            CircularProgressIndicator(),
+            SizedBox(height: 16),
+            Text('Optimizando ruta para el mapa...'),
+          ],
+        ),
+      ),
+    );
+
+    try {
+      // Mostrar diálogo para seleccionar hora de inicio
+      Navigator.pop(context); // Cerrar loading dialog
+      final startTime = await _showStartTimeDialog();
+
+      if (startTime == null) {
+        return; // Usuario canceló
+      }
+
+      // Mostrar loading dialog nuevamente
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => const AlertDialog(
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              CircularProgressIndicator(),
+              SizedBox(height: 16),
+              Text('Generando ruta optimizada...'),
+            ],
+          ),
+        ),
+      );
+
+      final optimizedRoute = await _routeService.optimizeDeliveryRouteEnhanced(
+        startLocation: _currentLocation!,
+        orders: _pendingOrders,
+        startTime: startTime,
+      );
+
+      // Guardar la ruta optimizada
+      await _enhancedDeliveryService.saveEnhancedRoute(optimizedRoute);
+
+      setState(() {
+        _enhancedCurrentRoute = optimizedRoute;
+      });
+
+      Navigator.pop(context); // Cerrar loading dialog
+      _showMessage('Ruta optimizada generada exitosamente para el mapa');
+
+      print('💾 Ruta optimizada para mapa: ${optimizedRoute.id}');
+    } catch (e) {
+      Navigator.pop(context); // Cerrar loading dialog en caso de error
+      _showMessage('Error al optimizar ruta: $e', isError: true);
+      print('❌ Error optimizando para mapa: $e');
     }
   }
 
@@ -148,6 +462,7 @@ class _DeliveryManagementScreenState extends State<DeliveryManagementScreen>
           _buildOrderHistory(),
         ],
       ),
+
     );
   }
 
@@ -237,9 +552,9 @@ class _DeliveryManagementScreenState extends State<DeliveryManagementScreen>
               children: [
                 Expanded(
                   child: ElevatedButton.icon(
-                    onPressed: _pendingOrders.isNotEmpty ? _generateOptimalRoute : null,
+                    onPressed: _pendingOrders.isNotEmpty ? _navigateToRouteMap : null,
                     icon: const Icon(Icons.route),
-                    label: const Text('Generar Ruta Óptima'),
+                    label: const Text('Ir a Optimización Avanzada'),
                     style: ElevatedButton.styleFrom(
                       padding: const EdgeInsets.all(16),
                     ),
@@ -248,13 +563,10 @@ class _DeliveryManagementScreenState extends State<DeliveryManagementScreen>
               ],
             ),
 
-            if (_currentRoute != null) ...[
+            if (_enhancedCurrentRoute != null) ...[
               const SizedBox(height: 16),
-              _buildCurrentRouteCard(),
+              _buildEnhancedCurrentRouteCard(),
             ],
-
-       
-
           ],
         ),
       ),
@@ -288,8 +600,8 @@ class _DeliveryManagementScreenState extends State<DeliveryManagementScreen>
     );
   }
 
-  Widget _buildCurrentRouteCard() {
-    if (_currentRoute == null) return const SizedBox.shrink();
+  Widget _buildEnhancedCurrentRouteCard() {
+    if (_enhancedCurrentRoute == null) return const SizedBox.shrink();
 
     return Card(
       child: Padding(
@@ -302,11 +614,12 @@ class _DeliveryManagementScreenState extends State<DeliveryManagementScreen>
                 const Icon(Icons.route, color: Colors.blue),
                 const SizedBox(width: 8),
                 Text(
-                  'Ruta Actual',
+                  'Ruta Optimizada Avanzada',
                   style: Theme.of(context).textTheme.titleMedium?.copyWith(
                     fontWeight: FontWeight.bold,
                   ),
                 ),
+
               ],
             ),
             const SizedBox(height: 12),
@@ -315,35 +628,38 @@ class _DeliveryManagementScreenState extends State<DeliveryManagementScreen>
                 Expanded(
                   child: _buildRouteInfo(
                     'Entregas',
-                    '${_currentRoute!.completedOrders}/${_currentRoute!.totalOrders}',
+                    '${_enhancedCurrentRoute!.totalOrders}',
                   ),
                 ),
                 Expanded(
                   child: _buildRouteInfo(
                     'Distancia',
-                    _currentRoute!.formattedDistance,
+                    _enhancedCurrentRoute!.formattedDistance,
                   ),
                 ),
                 Expanded(
                   child: _buildRouteInfo(
-                    'Tiempo Est.',
-                    _currentRoute!.formattedDuration,
+                    'Duración',
+                    _enhancedCurrentRoute!.formattedDuration,
                   ),
                 ),
               ],
             ),
-            const SizedBox(height: 12),
-            LinearProgressIndicator(
-              value: _currentRoute!.progress,
-              backgroundColor: Colors.grey[300],
-              valueColor: AlwaysStoppedAnimation<Color>(
-                _currentRoute!.progress == 1.0 ? Colors.green : Colors.blue,
-              ),
-            ),
             const SizedBox(height: 8),
-            Text(
-              'Progreso: ${(_currentRoute!.progress * 100).toStringAsFixed(0)}%',
-              style: Theme.of(context).textTheme.bodySmall,
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: Colors.green.shade100,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Text(
+                'Horario: ${_enhancedCurrentRoute!.formattedPlannedStartTime} - ${_enhancedCurrentRoute!.formattedEstimatedEndTime}',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: Colors.green.shade800,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
             ),
           ],
         ),
@@ -450,42 +766,108 @@ class _DeliveryManagementScreenState extends State<DeliveryManagementScreen>
       padding: const EdgeInsets.all(16),
       child: Column(
         children: [
+          // Card de optimización - Modificado para incluir botón de optimizar aquí también
           Card(
             child: Padding(
               padding: const EdgeInsets.all(16),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    'Optimización de Ruta',
-                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  const Text(
-                    'Genera la ruta más eficiente para entregar todos los pedidos pendientes, considerando distancia y tiempo de viaje.',
-                  ),
-                  const SizedBox(height: 16),
                   Row(
                     children: [
+                      // Botón para optimizar ruta
                       Expanded(
                         child: ElevatedButton.icon(
-                          onPressed: _pendingOrders.isNotEmpty ? _generateOptimalRoute : null,
-                          icon: const Icon(Icons.auto_fix_high),
-                          label: Text(_pendingOrders.isEmpty
-                              ? 'No hay pedidos pendientes'
-                              : 'Generar Ruta Óptima (${_pendingOrders.length} pedidos)'),
+                          onPressed: _pendingOrders.isEmpty || _isOptimizing ? null : _optimizeRoute,
+                          icon: _isOptimizing
+                              ? const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                              : const Icon(Icons.auto_fix_high),
+                          label: Text(_isOptimizing
+                              ? 'Optimizando...'
+                              : _enhancedCurrentRoute != null
+                              ? 'Re-optimizar Ruta'
+                              : 'Optimizar Ruta'),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.deepPurple,
+                            foregroundColor: Colors.white,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      // Botón para ir al mapa - MEJORADO
+                      Expanded(
+                        child: ElevatedButton.icon(
+                          onPressed: _navigateToRouteMap,
+                          icon: const Icon(Icons.map),
+                          label: Text(_enhancedCurrentRoute != null
+                              ? 'Ver en Mapa'
+                              : 'Ir al Mapa'),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: _enhancedCurrentRoute != null ? Colors.green : Colors.blue,
+                            foregroundColor: Colors.white,
+                          ),
                         ),
                       ),
                     ],
+                  ),
+
+                  // Nuevo indicador visual del estado
+                  const SizedBox(height: 12),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: _enhancedCurrentRoute != null
+                          ? Colors.green.shade50
+                          : Colors.blue.shade50,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                        color: _enhancedCurrentRoute != null
+                            ? Colors.green.shade200
+                            : Colors.blue.shade200,
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(
+                          _enhancedCurrentRoute != null
+                              ? Icons.check_circle
+                              : Icons.info,
+                          color: _enhancedCurrentRoute != null
+                              ? Colors.green.shade700
+                              : Colors.blue.shade700,
+                          size: 16,
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            _enhancedCurrentRoute != null
+                                ? 'Ruta optimizada lista para visualizar en el mapa'
+                                : _pendingOrders.isNotEmpty
+                                ? 'Al ir al mapa, puedes optimizar automáticamente ${_pendingOrders.length} pedidos'
+                                : 'No hay pedidos pendientes para optimizar',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: _enhancedCurrentRoute != null
+                                  ? Colors.green.shade700
+                                  : Colors.blue.shade700,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ],
               ),
             ),
           ),
 
-          if (_currentRoute != null) ...[
+          // Mostrar ruta mejorada si existe
+          if (_enhancedCurrentRoute != null) ...[
             const SizedBox(height: 16),
             Expanded(
               child: Card(
@@ -497,63 +879,172 @@ class _DeliveryManagementScreenState extends State<DeliveryManagementScreen>
                       Row(
                         children: [
                           Text(
-                            'Secuencia de Entregas',
+                            'Secuencia de Entregas Optimizada',
                             style: Theme.of(context).textTheme.titleMedium?.copyWith(
                               fontWeight: FontWeight.bold,
                             ),
                           ),
-                          const Spacer(),
-                          Chip(
-                            label: Text('${_currentRoute!.orders.length} paradas'),
-                            backgroundColor: Colors.blue.shade100,
-                          ),
+
                         ],
                       ),
+                      const SizedBox(height: 12),
+
+                      // Resumen de la ruta
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: Theme.of(context).colorScheme.primaryContainer.withOpacity(0.3),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: _buildSummaryItem(
+                                Icons.local_shipping,
+                                '${_enhancedCurrentRoute!.totalOrders} entregas',
+                              ),
+                            ),
+                            Expanded(
+                              child: _buildSummaryItem(
+                                Icons.straighten,
+                                _enhancedCurrentRoute!.formattedDistance,
+                              ),
+                            ),
+                            Expanded(
+                              child: _buildSummaryItem(
+                                Icons.schedule,
+                                '${_enhancedCurrentRoute!.formattedPlannedStartTime} - ${_enhancedCurrentRoute!.formattedEstimatedEndTime}',
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+
                       const SizedBox(height: 16),
+
+                      // Lista de paradas optimizada
                       Expanded(
                         child: ListView.separated(
-                          itemCount: _currentRoute!.orders.length,
-                          separatorBuilder: (context, index) => const Divider(),
+                          itemCount: _enhancedCurrentRoute!.stopInfos.length,
+                          separatorBuilder: (context, index) => const Divider(height: 1),
                           itemBuilder: (context, index) {
-                            final order = _currentRoute!.orders[index];
-                            return ListTile(
-                              leading: CircleAvatar(
-                                backgroundColor: order.status == OrderStatus.entregado ? Colors.green : Colors.orange,
-                                child: Text(
-                                  '${index + 1}',
-                                  style: const TextStyle(
-                                    color: Colors.white,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
-                              ),
-                              title: Text(order.clientName),
-                              subtitle: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
+                            final stopInfo = _enhancedCurrentRoute!.stopInfos[index];
+                            return Container(
+                              padding: const EdgeInsets.all(12),
+                              child: Row(
                                 children: [
-                                  Text(order.address),
-                                  Text(
-                                    'Total: Bs. ${order.totalAmount.toStringAsFixed(2)}',
-                                    style: const TextStyle(fontSize: 12),
-                                  ),
-                                  // ✅ FIX: Verificar null safety para observations
-                                  if (order.observations != null && order.observations!.isNotEmpty)
-                                    Text(
-                                      'Obs: ${order.observations}',
-                                      style: TextStyle(
-                                        fontSize: 11,
-                                        color: Colors.grey[600],
-                                        fontStyle: FontStyle.italic,
+                                  // Número de secuencia
+                                  Container(
+                                    width: 32,
+                                    height: 32,
+                                    decoration: BoxDecoration(
+                                      color: Theme.of(context).colorScheme.primary,
+                                      borderRadius: BorderRadius.circular(16),
+                                    ),
+                                    child: Center(
+                                      child: Text(
+                                        '${stopInfo.sequence}',
+                                        style: TextStyle(
+                                          color: Theme.of(context).colorScheme.onPrimary,
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 12,
+                                        ),
                                       ),
                                     ),
+                                  ),
+
+                                  const SizedBox(width: 12),
+
+                                  // Información de la parada
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          stopInfo.order.clientName,
+                                          style: const TextStyle(
+                                            fontSize: 14,
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 2),
+                                        Text(
+                                          stopInfo.order.address,
+                                          style: TextStyle(
+                                            fontSize: 11,
+                                            color: Colors.grey[600],
+                                          ),
+                                          maxLines: 2,
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                        const SizedBox(height: 4),
+                                        Row(
+                                          children: [
+                                            Container(
+                                              padding: const EdgeInsets.symmetric(
+                                                horizontal: 6,
+                                                vertical: 2,
+                                              ),
+                                              decoration: BoxDecoration(
+                                                color: Colors.blue.shade100,
+                                                borderRadius: BorderRadius.circular(8),
+                                              ),
+                                              child: Text(
+                                                stopInfo.formattedEstimatedArrival,
+                                                style: TextStyle(
+                                                  fontSize: 10,
+                                                  color: Colors.blue.shade800,
+                                                  fontWeight: FontWeight.w500,
+                                                ),
+                                              ),
+                                            ),
+                                            const SizedBox(width: 6),
+                                            Container(
+                                              padding: const EdgeInsets.symmetric(
+                                                horizontal: 6,
+                                                vertical: 2,
+                                              ),
+                                              decoration: BoxDecoration(
+                                                color: Colors.green.shade100,
+                                                borderRadius: BorderRadius.circular(8),
+                                              ),
+                                              child: Text(
+                                                stopInfo.formattedDistanceFromPrevious,
+                                                style: TextStyle(
+                                                  fontSize: 10,
+                                                  color: Colors.green.shade800,
+                                                  fontWeight: FontWeight.w500,
+                                                ),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+
+                                  // Valor del pedido e info
+                                  Column(
+                                    children: [
+                                      Text(
+                                        'Bs. ${stopInfo.order.totalAmount.toStringAsFixed(0)}',
+                                        style: const TextStyle(
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                      IconButton(
+                                        onPressed: () => _showEnhancedOrderDetails(stopInfo),
+                                        icon: const Icon(Icons.info_outline),
+                                        iconSize: 16,
+                                        constraints: const BoxConstraints(
+                                          minWidth: 32,
+                                          minHeight: 32,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
                                 ],
-                              ),
-                              trailing: order.status == OrderStatus.entregado
-                                  ? const Icon(Icons.check_circle, color: Colors.green)
-                                  : IconButton(
-                                onPressed: () => _markOrderAsDelivered(order),
-                                icon: const Icon(Icons.check_circle_outline),
-                                tooltip: 'Marcar como entregado',
                               ),
                             );
                           },
@@ -564,7 +1055,380 @@ class _DeliveryManagementScreenState extends State<DeliveryManagementScreen>
                 ),
               ),
             ),
+          ] else ...[
+            const SizedBox(height: 16),
+            Expanded(
+              child: Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(32),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(
+                        Icons.route_outlined,
+                        size: 64,
+                        color: Colors.grey[400],
+                      ),
+                      const SizedBox(height: 16),
+                      Text(
+                        'No hay ruta optimizada',
+                        style: TextStyle(
+                          fontSize: 18,
+                          color: Colors.grey[600],
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        _pendingOrders.isNotEmpty
+                            ? 'Optimiza los ${_pendingOrders.length} pedidos pendientes para generar una secuencia de entregas eficiente'
+                            : 'No hay pedidos pendientes para optimizar',
+                        style: TextStyle(
+                          fontSize: 14,
+                          color: Colors.grey[500],
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+                      if (_pendingOrders.isNotEmpty) ...[
+                        const SizedBox(height: 16),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: ElevatedButton.icon(
+                                onPressed: _isOptimizing ? null : _optimizeRoute,
+                                icon: _isOptimizing
+                                    ? const SizedBox(
+                                  width: 16,
+                                  height: 16,
+                                  child: CircularProgressIndicator(strokeWidth: 2),
+                                )
+                                    : const Icon(Icons.auto_fix_high),
+                                label: Text(_isOptimizing
+                                    ? 'Optimizando...'
+                                    : 'Optimizar ${_pendingOrders.length} pedidos'),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: Colors.deepPurple,
+                                  foregroundColor: Colors.white,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: ElevatedButton.icon(
+                                onPressed: _navigateToRouteMap,
+                                icon: const Icon(Icons.map),
+                                label: const Text('Ir al Mapa'),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: Colors.blue,
+                                  foregroundColor: Colors.white,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
+            ),
           ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSummaryItem(IconData icon, String text) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, size: 14, color: Colors.grey[600]),
+        const SizedBox(width: 4),
+        Flexible(
+          child: Text(
+            text,
+            style: const TextStyle(fontSize: 11),
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+      ],
+    );
+  }
+
+  // Mostrar detalles mejorados del pedido (similar al RouteMapScreen)
+  void _showEnhancedOrderDetails(RouteStopInfo stopInfo) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => DraggableScrollableSheet(
+        initialChildSize: 0.6,
+        maxChildSize: 0.9,
+        minChildSize: 0.3,
+        builder: (context, scrollController) => Container(
+          padding: const EdgeInsets.all(20),
+          child: SingleChildScrollView(
+            controller: scrollController,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Header
+                Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: Theme.of(context).colorScheme.primaryContainer,
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Text(
+                        '${stopInfo.sequence}',
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                          color: Theme.of(context).colorScheme.onPrimaryContainer,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Parada ${stopInfo.sequence}',
+                            style: const TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.grey,
+                            ),
+                          ),
+                          Text(
+                            stopInfo.order.clientName,
+                            style: const TextStyle(
+                              fontSize: 20,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+
+                const SizedBox(height: 24),
+
+                // Información de timing
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: Colors.blue.withOpacity(0.15),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: Colors.blue.shade200),
+                  ),
+                  child: Column(
+                    children: [
+                      Row(
+                        children: [
+                          Icon(Icons.schedule, color: Colors.blue.shade800),
+                          const SizedBox(width: 8),
+                          const Text(
+                            'Información de Tiempo',
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.blue,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      _buildInfoRow('Hora estimada de llegada:', stopInfo.formattedEstimatedArrival),
+                      _buildInfoRow('Tiempo desde inicio:', stopInfo.formattedTimeFromStart),
+                      _buildInfoRow('Tiempo desde anterior:', stopInfo.formattedTimeFromPrevious),
+                    ],
+                  ),
+                ),
+
+                const SizedBox(height: 16),
+
+                // Información de distancia
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: Colors.green.withOpacity(0.15),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: Colors.green.shade200),
+                  ),
+                  child: Column(
+                    children: [
+                      Row(
+                        children: [
+                          Icon(Icons.straighten, color: Colors.green.shade700),
+                          const SizedBox(width: 8),
+                          const Text(
+                            'Información de Distancia',
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.green,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      _buildInfoRow('Distancia desde inicio:', stopInfo.formattedDistanceFromStart),
+                      _buildInfoRow('Distancia desde anterior:', stopInfo.formattedDistanceFromPrevious),
+                    ],
+                  ),
+                ),
+
+                const SizedBox(height: 16),
+
+                // Información del pedido
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: Colors.orange.withOpacity(0.15),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: Colors.orange.shade200),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(Icons.shopping_bag, color: Colors.orange.shade700),
+                          const SizedBox(width: 8),
+                          const Text(
+                            'Detalles del Pedido',
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.orange,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      _buildInfoRow('Cliente:', stopInfo.order.clientName),
+                      _buildInfoRow('Teléfono:', stopInfo.order.clientPhone),
+                      _buildInfoRow('Dirección:', stopInfo.order.address),
+                      _buildInfoRow('Total:', 'Bs. ${stopInfo.order.totalAmount.toStringAsFixed(2)}'),
+
+                      const SizedBox(height: 12),
+                      const Text(
+                        'Productos:',
+                        style: TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                      const SizedBox(height: 8),
+                      ...stopInfo.order.items.map((item) => Padding(
+                        padding: const EdgeInsets.only(left: 8, bottom: 4),
+                        child: Text('• ${item.name} x${item.quantity} - Bs. ${item.price.toStringAsFixed(2)}'),
+                      )),
+
+                      if (stopInfo.order.observations != null && stopInfo.order.observations!.isNotEmpty) ...[
+                        const SizedBox(height: 12),
+                        Text(
+                          'Observaciones: ${stopInfo.order.observations}',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.grey[600],
+                            fontStyle: FontStyle.italic,
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+
+                const SizedBox(height: 20),
+
+                // Botones de acción
+                Row(
+                  children: [
+                    Expanded(
+                      child: ElevatedButton.icon(
+                        onPressed: () {
+                          Navigator.pop(context);
+                          _navigateToRouteMapWithOptimizedRoute();
+                        },
+                        icon: const Icon(Icons.map),
+                        label: const Text('Ver en Mapa'),
+                        style: ElevatedButton.styleFrom(
+                          padding: const EdgeInsets.all(12),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: ElevatedButton.icon(
+                        onPressed: () {
+                          Navigator.pop(context);
+                          // Aquí puedes agregar funcionalidad para llamar
+                          // launch('tel:${stopInfo.order.clientPhone}');
+                        },
+                        icon: const Icon(Icons.phone),
+                        label: const Text('Llamar'),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.green,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.all(12),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildInfoRow(String label, String value) {
+    if (label.toLowerCase().contains('dirección') || label.toLowerCase().contains('direccion')) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 2),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              label,
+              style: const TextStyle(fontSize: 14),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              value,
+              style: const TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.bold,
+              ),
+              softWrap: true,
+            ),
+          ],
+        ),
+      );
+    }
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(
+            label,
+            style: const TextStyle(fontSize: 14),
+          ),
+          Text(
+            value,
+            style: const TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
         ],
       ),
     );

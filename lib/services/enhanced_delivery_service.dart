@@ -282,6 +282,9 @@ class EnhancedDeliveryService {
     );
   }
 
+  Future<EnhancedDeliveryRoute?> getCurrentEnhancedRoute() async {
+    return await getActiveEnhancedRoute();
+  }
   // ===== MÉTODOS PRIVADOS DE CONVERSIÓN =====
 
   Order _orderFromBackendJson(Map<String, dynamic> json) {

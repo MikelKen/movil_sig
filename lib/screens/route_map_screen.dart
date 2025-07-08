@@ -4,7 +4,7 @@ import 'package:sig/models/enhanced_route_models.dart';
 import '../models/delivery_route.dart';
 import '../models/order.dart';
 import '../services/enhanced_route_optimization_service.dart';
-import '../services/enhanced_delivery_service.dart'; // Usar el servicio corregido
+import '../services/enhanced_delivery_service.dart';
 import '../services/location_service.dart';
 import 'delivery_management_screen.dart' as delivery_screen;
 
@@ -18,7 +18,7 @@ class RouteMapScreen extends StatefulWidget {
 class _RouteMapScreenState extends State<RouteMapScreen> {
   GoogleMapController? _mapController;
   final LocationService _locationService = LocationService();
-  final EnhancedDeliveryService _deliveryService = EnhancedDeliveryService(); // Usar servicio corregido
+  final EnhancedDeliveryService _deliveryService = EnhancedDeliveryService();
   final EnhancedRouteOptimizationService _routeService = EnhancedRouteOptimizationService();
 
   LatLng? _currentLocation;
@@ -50,6 +50,7 @@ class _RouteMapScreenState extends State<RouteMapScreen> {
     });
 
     try {
+      // 1. Obtener ubicación actual
       final locationData = await _locationService.getCurrentLocation();
       if (locationData != null) {
         _currentLocation = LatLng(locationData.latitude!, locationData.longitude!);
@@ -57,8 +58,28 @@ class _RouteMapScreenState extends State<RouteMapScreen> {
         _currentLocation = const LatLng(-17.8146, -63.1561);
       }
 
+      // 2. Obtener pedidos pendientes
       _pendingOrders = await _deliveryService.getPendingOrders();
-      _updateMarkersWithoutRoute();
+
+      // 3. **NUEVO**: Intentar cargar ruta optimizada existente
+      final existingRoute = await _deliveryService.getActiveEnhancedRoute();
+      if (existingRoute != null) {
+        print('📍 Ruta optimizada encontrada, cargando automáticamente...');
+        setState(() {
+          _optimizedRoute = existingRoute;
+        });
+
+        // Mostrar la ruta en el mapa
+        await _displayRouteOnMap();
+
+        // Ajustar la vista del mapa a la ruta
+        await _fitMapToRoute();
+
+        _showMessage('Ruta optimizada cargada automáticamente');
+      } else {
+        // Si no hay ruta optimizada, mostrar solo los marcadores
+        _updateMarkersWithoutRoute();
+      }
 
       setState(() {
         _isLoading = false;
@@ -68,6 +89,7 @@ class _RouteMapScreenState extends State<RouteMapScreen> {
         _errorMessage = 'Error cargando datos: $e';
         _isLoading = false;
       });
+      print('❌ Error en _initializeData: $e');
     }
   }
 
@@ -122,9 +144,41 @@ class _RouteMapScreenState extends State<RouteMapScreen> {
       ),
     ).then((_) {
       if (mounted) {
-        _initializeData();
+        // **MODIFICADO**: Recargar solo datos básicos, mantener ruta si existe
+        _reloadBasicData();
       }
     });
+  }
+
+  // **NUEVO**: Método para recargar solo datos básicos sin perder la ruta
+  Future<void> _reloadBasicData() async {
+    try {
+      // Actualizar pedidos pendientes
+      _pendingOrders = await _deliveryService.getPendingOrders();
+
+      // Verificar si la ruta sigue siendo válida
+      final currentRoute = await _deliveryService.getActiveEnhancedRoute();
+      if (currentRoute != null && _optimizedRoute?.id == currentRoute.id) {
+        // La ruta sigue siendo la misma, mantenerla
+        print('✅ Ruta optimizada mantenida');
+      } else if (currentRoute != null) {
+        // Hay una nueva ruta, cargarla
+        setState(() {
+          _optimizedRoute = currentRoute;
+        });
+        await _displayRouteOnMap();
+        print('🔄 Nueva ruta optimizada cargada');
+      } else {
+        // No hay ruta, limpiar
+        setState(() {
+          _optimizedRoute = null;
+        });
+        _updateMarkersWithoutRoute();
+        print('🧹 Ruta optimizada eliminada');
+      }
+    } catch (e) {
+      print('❌ Error recargando datos básicos: $e');
+    }
   }
 
   Future<void> _optimizeRoute() async {
@@ -167,6 +221,8 @@ class _RouteMapScreenState extends State<RouteMapScreen> {
 
       await _displayRouteOnMap();
       _showMessage('Ruta optimizada generada exitosamente');
+
+      print('💾 Ruta optimizada guardada y mostrada: ${optimizedRoute.id}');
     } catch (e) {
       setState(() {
         _errorMessage = 'Error optimizando ruta: $e';
@@ -253,7 +309,10 @@ class _RouteMapScreenState extends State<RouteMapScreen> {
       _polylines = polylines;
     });
 
-    await _fitMapToRoute();
+    // **NUEVO**: Ajustar automáticamente la vista del mapa
+    if (_mapController != null) {
+      await _fitMapToRoute();
+    }
   }
 
   void _updateMarkersWithoutRoute() {
@@ -344,6 +403,47 @@ class _RouteMapScreenState extends State<RouteMapScreen> {
       southwest: LatLng(minLat, minLng),
       northeast: LatLng(maxLat, maxLng),
     );
+  }
+
+  // **NUEVO**: Método para limpiar/eliminar ruta optimizada
+  Future<void> _clearOptimizedRoute() async {
+    try {
+      // Confirmar con el usuario
+      final shouldClear = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Limpiar Ruta'),
+          content: const Text('¿Estás seguro de que quieres eliminar la ruta optimizada actual?'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancelar'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              style: TextButton.styleFrom(foregroundColor: Colors.red),
+              child: const Text('Eliminar'),
+            ),
+          ],
+        ),
+      );
+
+      if (shouldClear == true) {
+        setState(() {
+          _optimizedRoute = null;
+        });
+
+        // Limpiar del storage (opcional - puedes mantener para historial)
+        // await _deliveryService.clearActiveRoute();
+
+        _updateMarkersWithoutRoute();
+        _showMessage('Ruta optimizada eliminada');
+
+        print('🧹 Ruta optimizada limpiada');
+      }
+    } catch (e) {
+      _showMessage('Error al limpiar ruta: $e', isError: true);
+    }
   }
 
   void _showEnhancedOrderDetails(RouteStopInfo stopInfo) {
@@ -449,7 +549,7 @@ class _RouteMapScreenState extends State<RouteMapScreen> {
                   padding: const EdgeInsets.all(16),
                   decoration: BoxDecoration(
                     color: Colors.green.withOpacity(0.15),
-                  borderRadius: BorderRadius.circular(12),
+                    borderRadius: BorderRadius.circular(12),
                     border: Border.all(color: Colors.green.shade200),
                   ),
                   child: Column(
@@ -463,7 +563,7 @@ class _RouteMapScreenState extends State<RouteMapScreen> {
                             style: TextStyle(
                               fontSize: 16,
                               fontWeight: FontWeight.bold,
-                              color: Colors.green
+                              color: Colors.green,
                             ),
                           ),
                         ],
@@ -497,7 +597,7 @@ class _RouteMapScreenState extends State<RouteMapScreen> {
                             style: TextStyle(
                               fontSize: 16,
                               fontWeight: FontWeight.bold,
-                              color: Colors.orange
+                              color: Colors.orange,
                             ),
                           ),
                         ],
@@ -672,40 +772,6 @@ class _RouteMapScreenState extends State<RouteMapScreen> {
     );
   }
 
-  void _showRouteStatistics() {
-    if (_optimizedRoute == null) return;
-
-    final stats = _routeService.calculateEnhancedRouteStatistics(_optimizedRoute!);
-
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Estadísticas de Ruta'),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              _buildStatRow('Total de entregas:', '${stats['totalOrders']}'),
-              _buildStatRow('Valor total:', 'Bs. ${stats['totalValue'].toStringAsFixed(2)}'),
-              _buildStatRow('Distancia total:', stats['totalDistance']),
-              _buildStatRow('Tiempo estimado:', stats['estimatedTime']),
-              _buildStatRow('Tiempo promedio por entrega:', stats['averageTimePerDelivery']),
-              _buildStatRow('Tiempo total de servicio:', stats['totalServiceTime']),
-              _buildStatRow('Hora estimada de fin:', _optimizedRoute!.formattedEstimatedEndTime),
-              _buildStatRow('Método optimización:', _optimizedRoute!.optimizationMethod),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cerrar'),
-          ),
-        ],
-      ),
-    );
-  }
-
   Widget _buildStatRow(String label, String value) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
@@ -739,6 +805,7 @@ class _RouteMapScreenState extends State<RouteMapScreen> {
       ),
     );
   }
+
 
   void _showRouteDetailPanel() {
     showModalBottomSheet(
@@ -1004,17 +1071,19 @@ class _RouteMapScreenState extends State<RouteMapScreen> {
                 ),
               ),
             ),
-          if (_optimizedRoute != null)
-            IconButton(
-              onPressed: _showRouteStatistics,
-              icon: const Icon(Icons.analytics),
-              tooltip: 'Estadísticas',
-            ),
+
           if (_optimizedRoute != null)
             IconButton(
               onPressed: _showRouteDetailPanel,
               icon: const Icon(Icons.list),
               tooltip: 'Ver Secuencia',
+            ),
+          // **NUEVO**: Botón para limpiar ruta
+          if (_optimizedRoute != null)
+            IconButton(
+              onPressed: _clearOptimizedRoute,
+              icon: const Icon(Icons.clear),
+              tooltip: 'Limpiar Ruta',
             ),
           SizedBox(width: isTablet ? 16 : 8),
         ],
@@ -1057,7 +1126,15 @@ class _RouteMapScreenState extends State<RouteMapScreen> {
           : Stack(
         children: [
           GoogleMap(
-            onMapCreated: (controller) => _mapController = controller,
+            onMapCreated: (controller) {
+              _mapController = controller;
+              // **NUEVO**: Si hay ruta optimizada, ajustar vista automáticamente
+              if (_optimizedRoute != null) {
+                Future.delayed(const Duration(milliseconds: 500), () {
+                  _fitMapToRoute();
+                });
+              }
+            },
             initialCameraPosition: CameraPosition(
               target: _currentLocation ?? const LatLng(-17.8146, -63.1561),
               zoom: isTablet ? 15 : 12,
@@ -1304,8 +1381,6 @@ class _RouteMapScreenState extends State<RouteMapScreen> {
                 ),
               ),
             ),
-
-
         ],
       ),
 
@@ -1323,6 +1398,8 @@ class _RouteMapScreenState extends State<RouteMapScreen> {
             : const Icon(Icons.auto_fix_high),
         label: Text(_isOptimizing
             ? 'Optimizando...'
+            : _optimizedRoute != null
+            ? 'Re-optimizar Ruta'
             : 'Optimizar Ruta Avanzada'),
         backgroundColor: Colors.deepPurple,
         foregroundColor: Colors.white,
