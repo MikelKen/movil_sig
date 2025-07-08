@@ -1,8 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:sig/screens/map_screen.dart';
 import 'package:sig/screens/route_map_screen.dart';
-import 'package:sig/screens/simple_map_screen.dart';
 import 'screens/interactive_map_screen.dart';
 
 void main() {
@@ -19,7 +17,7 @@ class MyApp extends StatelessWidget {
       theme: _buildLightTheme(),
       darkTheme: _buildDarkTheme(),
       themeMode: ThemeMode.dark, // Modo oscuro por defecto
-      home: const MapScreen(),
+      home: const RouteMapScreen(),
       debugShowCheckedModeBanner: false,
     );
   }

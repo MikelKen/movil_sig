@@ -5,6 +5,7 @@ import '../models/order.dart';
 import '../services/route_optimization_service.dart';
 import '../services/delivery_service.dart';
 import '../services/location_service.dart';
+import 'delivery_management_screen.dart' as delivery_screen;
 
 class RouteMapScreen extends StatefulWidget {
   const RouteMapScreen({super.key});
@@ -25,6 +26,7 @@ class _RouteMapScreenState extends State<RouteMapScreen> {
   Set<Polyline> _polylines = {};
   bool _isLoading = false;
   bool _isOptimizing = false;
+  bool _isLoadingLocation = false;
   String? _errorMessage;
   List<Order> _pendingOrders = [];
 
@@ -66,6 +68,67 @@ class _RouteMapScreenState extends State<RouteMapScreen> {
         _isLoading = false;
       });
     }
+  }
+
+  // ✅ Método para centrar el mapa en la ubicación actual
+  void _centerMapOnCurrentLocation() {
+    if (_currentLocation != null && _mapController != null && mounted) {
+      _mapController!.animateCamera(
+        CameraUpdate.newLatLngZoom(_currentLocation!, 16),
+      );
+    }
+  }
+
+  // ✅ Método para actualizar la ubicación actual
+  Future<void> _updateCurrentLocation() async {
+    setState(() {
+      _isLoadingLocation = true;
+    });
+
+    try {
+      final locationData = await _locationService.getCurrentLocation();
+      if (locationData != null && mounted) {
+        setState(() {
+          _currentLocation = LatLng(
+            locationData.latitude!,
+            locationData.longitude!,
+          );
+        });
+        _centerMapOnCurrentLocation();
+
+        // Actualizar marcadores si no hay ruta optimizada
+        if (_optimizedRoute == null) {
+          _updateMarkersWithoutRoute();
+        } else {
+          await _displayRouteOnMap();
+        }
+
+        _showMessage('Ubicación actualizada');
+      }
+    } catch (e) {
+      _showMessage('Error al obtener ubicación: $e', isError: true);
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoadingLocation = false;
+        });
+      }
+    }
+  }
+
+  // ✅ Método para navegar a la gestión de entregas
+  void _navigateToDeliveryManagement() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => const delivery_screen.DeliveryManagementScreen(),
+      ),
+    ).then((_) {
+      if (mounted) {
+        // Recargar datos cuando se regrese de la pantalla de gestión
+        _initializeData();
+      }
+    });
   }
 
   Future<void> _optimizeRoute() async {
@@ -358,6 +421,8 @@ class _RouteMapScreenState extends State<RouteMapScreen> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final size = MediaQuery.of(context).size;
+    final isTablet = size.width > 600;
 
     return Scaffold(
       appBar: AppBar(
@@ -366,168 +431,294 @@ class _RouteMapScreenState extends State<RouteMapScreen> {
         foregroundColor: theme.colorScheme.onSurface,
         elevation: 0,
         actions: [
+          // ✅ Indicador de carga de ubicación en el AppBar
+          if (_isLoadingLocation)
+            Padding(
+              padding: EdgeInsets.all(isTablet ? 20 : 16),
+              child: SizedBox(
+                width: isTablet ? 24 : 20,
+                height: isTablet ? 24 : 20,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  valueColor: AlwaysStoppedAnimation<Color>(
+                    theme.colorScheme.primary,
+                  ),
+                ),
+              ),
+            ),
           if (_optimizedRoute != null)
             IconButton(
               onPressed: _showRouteStatistics,
               icon: const Icon(Icons.analytics),
               tooltip: 'Estadísticas',
             ),
+          SizedBox(width: isTablet ? 16 : 8),
         ],
       ),
       body: _isLoading
           ? const Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  CircularProgressIndicator(),
-                  SizedBox(height: 16),
-                  Text('Cargando datos...'),
-                ],
-              ),
-            )
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            CircularProgressIndicator(),
+            SizedBox(height: 16),
+            Text('Cargando datos...'),
+          ],
+        ),
+      )
           : _errorMessage != null
-              ? Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(
-                        Icons.error_outline,
-                        size: 64,
-                        color: theme.colorScheme.error,
-                      ),
-                      const SizedBox(height: 16),
-                      Text(
-                        _errorMessage!,
-                        style: TextStyle(color: theme.colorScheme.error),
-                        textAlign: TextAlign.center,
-                      ),
-                      const SizedBox(height: 16),
-                      ElevatedButton(
-                        onPressed: _initializeData,
-                        child: const Text('Reintentar'),
+          ? Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              Icons.error_outline,
+              size: 64,
+              color: theme.colorScheme.error,
+            ),
+            const SizedBox(height: 16),
+            Text(
+              _errorMessage!,
+              style: TextStyle(color: theme.colorScheme.error),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 16),
+            ElevatedButton(
+              onPressed: _initializeData,
+              child: const Text('Reintentar'),
+            ),
+          ],
+        ),
+      )
+          : Stack(
+        children: [
+          GoogleMap(
+            onMapCreated: (controller) => _mapController = controller,
+            initialCameraPosition: CameraPosition(
+              target: _currentLocation ?? const LatLng(-17.8146, -63.1561),
+              zoom: isTablet ? 15 : 12,
+            ),
+            markers: _markers,
+            polylines: _polylines,
+            myLocationEnabled: true,
+            myLocationButtonEnabled: false,
+            zoomControlsEnabled: false,
+            mapToolbarEnabled: false,
+            compassEnabled: true,
+            buildingsEnabled: false,
+            trafficEnabled: false,
+            style: theme.brightness == Brightness.dark ? _darkMapStyle : null,
+          ),
+
+          // ✅ Botones de acción flotantes
+          Positioned(
+            bottom: isTablet ? 200 : 180,
+            right: isTablet ? 32 : 20,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // ✅ Botón de gestión de entregas
+                Container(
+                  margin: const EdgeInsets.only(bottom: 16),
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(isTablet ? 20 : 16),
+                    boxShadow: [
+                      BoxShadow(
+                        color: theme.colorScheme.shadow.withOpacity(0.3),
+                        blurRadius: 8,
+                        offset: const Offset(0, 4),
                       ),
                     ],
                   ),
-                )
-              : Stack(
-                  children: [
-                    GoogleMap(
-                      onMapCreated: (controller) => _mapController = controller,
-                      initialCameraPosition: CameraPosition(
-                        target: _currentLocation ?? const LatLng(-17.8146, -63.1561),
-                        zoom: 12,
-                      ),
-                      markers: _markers,
-                      polylines: _polylines,
-                      myLocationEnabled: true,
-                      myLocationButtonEnabled: false,
-                      zoomControlsEnabled: false,
-                      mapToolbarEnabled: false,
-                      compassEnabled: true,
-                      buildingsEnabled: false,
-                      trafficEnabled: false,
-                      style: theme.brightness == Brightness.dark ? _darkMapStyle : null,
+                  child: FloatingActionButton(
+                    heroTag: "delivery_management",
+                    onPressed: _navigateToDeliveryManagement,
+                    backgroundColor: theme.colorScheme.secondary,
+                    foregroundColor: theme.colorScheme.onSecondary,
+                    elevation: 0,
+                    tooltip: 'Gestión de Entregas',
+                    child: Icon(
+                      Icons.local_shipping,
+                      size: isTablet ? 28 : 24,
                     ),
-                    if (_optimizedRoute != null)
-                      Positioned(
-                        top: 16,
-                        left: 16,
-                        right: 16,
-                        child: Card(
-                          elevation: 8,
-                          child: Padding(
-                            padding: const EdgeInsets.all(16),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Row(
-                                  children: [
-                                    Icon(
-                                      Icons.route,
-                                      color: theme.colorScheme.primary,
-                                    ),
-                                    const SizedBox(width: 8),
-                                    const Text(
-                                      'Ruta Optimizada',
-                                      style: TextStyle(
-                                        fontSize: 18,
-                                        fontWeight: FontWeight.bold,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                                const SizedBox(height: 12),
-                                Row(
-                                  children: [
-                                    Expanded(
-                                      child: _buildInfoItem(
-                                        Icons.local_shipping,
-                                        '${_optimizedRoute!.totalOrders} entregas',
-                                      ),
-                                    ),
-                                    Expanded(
-                                      child: _buildInfoItem(
-                                        Icons.straighten,
-                                        _optimizedRoute!.formattedDistance,
-                                      ),
-                                    ),
-                                    Expanded(
-                                      child: _buildInfoItem(
-                                        Icons.access_time,
-                                        _optimizedRoute!.formattedDuration,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ),
-                    if (_optimizedRoute == null && _pendingOrders.isNotEmpty)
-                      Positioned(
-                        top: 16,
-                        left: 16,
-                        right: 16,
-                        child: Card(
-                          elevation: 8,
-                          child: Padding(
-                            padding: const EdgeInsets.all(16),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  '${_pendingOrders.length} entregas pendientes',
-                                  style: const TextStyle(
-                                    fontSize: 16,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
-                                const SizedBox(height: 8),
-                                const Text(
-                                  'Presiona el botón para optimizar la ruta',
-                                  style: TextStyle(color: Colors.grey),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ),
-                  ],
+                  ),
                 ),
+
+                // ✅ Botón para actualizar ubicación
+                Container(
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(isTablet ? 20 : 16),
+                    boxShadow: [
+                      BoxShadow(
+                        color: theme.colorScheme.shadow.withOpacity(0.3),
+                        blurRadius: 8,
+                        offset: const Offset(0, 4),
+                      ),
+                    ],
+                  ),
+                  child: FloatingActionButton(
+                    heroTag: "update_location",
+                    onPressed: _isLoadingLocation ? null : _updateCurrentLocation,
+                    backgroundColor: theme.colorScheme.tertiary,
+                    foregroundColor: theme.colorScheme.onTertiary,
+                    elevation: 0,
+                    tooltip: 'Actualizar Ubicación',
+                    child: _isLoadingLocation
+                        ? SizedBox(
+                      width: isTablet ? 24 : 20,
+                      height: isTablet ? 24 : 20,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: theme.colorScheme.onTertiary,
+                      ),
+                    )
+                        : Icon(
+                      Icons.gps_fixed,
+                      size: isTablet ? 28 : 24,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          // ✅ Botón para centrar en ubicación actual
+          Positioned(
+            bottom: isTablet ? 120 : 100,
+            right: isTablet ? 32 : 20,
+            child: Container(
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(isTablet ? 20 : 16),
+                boxShadow: [
+                  BoxShadow(
+                    color: theme.colorScheme.shadow.withOpacity(0.3),
+                    blurRadius: 8,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
+              ),
+              child: FloatingActionButton(
+                heroTag: "center_location",
+                onPressed: _centerMapOnCurrentLocation,
+                backgroundColor: theme.colorScheme.primary,
+                foregroundColor: theme.colorScheme.onPrimary,
+                elevation: 0,
+                tooltip: 'Centrar en Mi Ubicación',
+                child: Icon(
+                  Icons.my_location,
+                  size: isTablet ? 28 : 24,
+                ),
+              ),
+            ),
+          ),
+
+          // Información de la ruta optimizada
+          if (_optimizedRoute != null)
+            Positioned(
+              top: 16,
+              left: 16,
+              right: 16,
+              child: Card(
+                elevation: 8,
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(
+                            Icons.route,
+                            color: theme.colorScheme.primary,
+                          ),
+                          const SizedBox(width: 8),
+                          const Text(
+                            'Ruta Optimizada',
+                            style: TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: _buildInfoItem(
+                              Icons.local_shipping,
+                              '${_optimizedRoute!.totalOrders} entregas',
+                            ),
+                          ),
+                          Expanded(
+                            child: _buildInfoItem(
+                              Icons.straighten,
+                              _optimizedRoute!.formattedDistance,
+                            ),
+                          ),
+                          Expanded(
+                            child: _buildInfoItem(
+                              Icons.access_time,
+                              _optimizedRoute!.formattedDuration,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+
+          // Información cuando no hay ruta optimizada
+          if (_optimizedRoute == null && _pendingOrders.isNotEmpty)
+            Positioned(
+              top: 16,
+              left: 16,
+              right: 16,
+              child: Card(
+                elevation: 8,
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '${_pendingOrders.length} entregas pendientes',
+                        style: const TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      const Text(
+                        'Presiona el botón para optimizar la ruta',
+                        style: TextStyle(color: Colors.grey),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+
+
+        ],
+      ),
+
+      // Botón principal de optimización
       floatingActionButton: _pendingOrders.isEmpty
           ? null
           : FloatingActionButton.extended(
-              onPressed: _isOptimizing ? null : _optimizeRoute,
-              icon: _isOptimizing
-                  ? const SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Icon(Icons.route),
-              label: Text(_isOptimizing ? 'Optimizando...' : 'Optimizar Ruta'),
-            ),
+        onPressed: _isOptimizing ? null : _optimizeRoute,
+        icon: _isOptimizing
+            ? const SizedBox(
+          width: 20,
+          height: 20,
+          child: CircularProgressIndicator(strokeWidth: 2),
+        )
+            : const Icon(Icons.route),
+        label: Text(_isOptimizing ? 'Optimizando...' : 'Optimizar Ruta'),
+      ),
     );
   }
 

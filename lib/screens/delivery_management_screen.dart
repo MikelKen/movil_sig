@@ -253,44 +253,8 @@ class _DeliveryManagementScreenState extends State<DeliveryManagementScreen>
               _buildCurrentRouteCard(),
             ],
 
-            // Información adicional si hay datos del backend
-            if (_isConnectedToBackend && _allOrders.isNotEmpty) ...[
-              const SizedBox(height: 24),
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: Colors.green.shade50,
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.green.shade200),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Icon(Icons.cloud_done, color: Colors.green.shade700),
-                        const SizedBox(width: 8),
-                        Text(
-                          'Datos sincronizados',
-                          style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            color: Colors.green.shade700,
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      'Total de ${_allOrders.length} pedidos cargados desde el servidor. '
-                          'Última actualización: ${DateTime.now().hour.toString().padLeft(2, '0')}:'
-                          '${DateTime.now().minute.toString().padLeft(2, '0')}',
-                      style: TextStyle(color: Colors.green.shade600),
-                    ),
-                  ],
-                ),
-              ),
-            ],
+       
+
           ],
         ),
       ),
