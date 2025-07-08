@@ -944,7 +944,7 @@ class _InteractiveMapScreenState extends State<InteractiveMapScreen>
                           ),
                           const SizedBox(width: 8),
                           Text(
-                            '${_pendingOrders.length} entregas pendientes',
+                            '${_pendingOrders.length} entregas pendientess',
                             style: TextStyle(
                               color: theme.colorScheme.onPrimaryContainer,
                               fontWeight: FontWeight.w500,

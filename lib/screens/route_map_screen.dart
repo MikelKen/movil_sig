@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:sig/models/enhanced_route_models.dart';
 import '../models/delivery_route.dart';
 import '../models/order.dart';
-import '../services/route_optimization_service.dart';
-import '../services/delivery_service.dart';
+import '../services/enhanced_route_optimization_service.dart';
+import '../services/enhanced_delivery_service.dart'; // Usar el servicio corregido
 import '../services/location_service.dart';
 import 'delivery_management_screen.dart' as delivery_screen;
 
@@ -17,11 +18,11 @@ class RouteMapScreen extends StatefulWidget {
 class _RouteMapScreenState extends State<RouteMapScreen> {
   GoogleMapController? _mapController;
   final LocationService _locationService = LocationService();
-  final DeliveryService _deliveryService = DeliveryService();
-  final RouteOptimizationService _routeOptimizationService = RouteOptimizationService();
+  final EnhancedDeliveryService _deliveryService = EnhancedDeliveryService(); // Usar servicio corregido
+  final EnhancedRouteOptimizationService _routeService = EnhancedRouteOptimizationService();
 
   LatLng? _currentLocation;
-  DeliveryRoute? _optimizedRoute;
+  EnhancedDeliveryRoute? _optimizedRoute;
   Set<Marker> _markers = {};
   Set<Polyline> _polylines = {};
   bool _isLoading = false;
@@ -70,7 +71,6 @@ class _RouteMapScreenState extends State<RouteMapScreen> {
     }
   }
 
-  // ✅ Método para centrar el mapa en la ubicación actual
   void _centerMapOnCurrentLocation() {
     if (_currentLocation != null && _mapController != null && mounted) {
       _mapController!.animateCamera(
@@ -79,7 +79,6 @@ class _RouteMapScreenState extends State<RouteMapScreen> {
     }
   }
 
-  // ✅ Método para actualizar la ubicación actual
   Future<void> _updateCurrentLocation() async {
     setState(() {
       _isLoadingLocation = true;
@@ -96,7 +95,6 @@ class _RouteMapScreenState extends State<RouteMapScreen> {
         });
         _centerMapOnCurrentLocation();
 
-        // Actualizar marcadores si no hay ruta optimizada
         if (_optimizedRoute == null) {
           _updateMarkersWithoutRoute();
         } else {
@@ -116,7 +114,6 @@ class _RouteMapScreenState extends State<RouteMapScreen> {
     }
   }
 
-  // ✅ Método para navegar a la gestión de entregas
   void _navigateToDeliveryManagement() {
     Navigator.push(
       context,
@@ -125,7 +122,6 @@ class _RouteMapScreenState extends State<RouteMapScreen> {
       ),
     ).then((_) {
       if (mounted) {
-        // Recargar datos cuando se regrese de la pantalla de gestión
         _initializeData();
       }
     });
@@ -137,7 +133,7 @@ class _RouteMapScreenState extends State<RouteMapScreen> {
       return;
     }
 
-    if (!_routeOptimizationService.isApiKeyConfigured()) {
+    if (!_routeService.isApiKeyConfigured()) {
       _showMessage('API Key de Google Maps no configurada', isError: true);
       return;
     }
@@ -148,10 +144,21 @@ class _RouteMapScreenState extends State<RouteMapScreen> {
     });
 
     try {
-      final optimizedRoute = await _routeOptimizationService.optimizeDeliveryRoute(
+      // Mostrar diálogo para seleccionar hora de inicio
+      final startTime = await _showStartTimeDialog();
+      if (startTime == null) {
+        setState(() => _isOptimizing = false);
+        return;
+      }
+
+      final optimizedRoute = await _routeService.optimizeDeliveryRouteEnhanced(
         startLocation: _currentLocation!,
         orders: _pendingOrders,
+        startTime: startTime,
       );
+
+      // Guardar la ruta optimizada
+      await _deliveryService.saveEnhancedRoute(optimizedRoute);
 
       setState(() {
         _optimizedRoute = optimizedRoute;
@@ -169,44 +176,66 @@ class _RouteMapScreenState extends State<RouteMapScreen> {
     }
   }
 
+  Future<DateTime?> _showStartTimeDialog() async {
+    final now = DateTime.now();
+    final selectedTime = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay.fromDateTime(now),
+      helpText: 'Selecciona hora de inicio',
+    );
+
+    if (selectedTime != null) {
+      return DateTime(
+        now.year,
+        now.month,
+        now.day,
+        selectedTime.hour,
+        selectedTime.minute,
+      );
+    }
+    return null;
+  }
+
   Future<void> _displayRouteOnMap() async {
     if (_optimizedRoute == null) return;
 
     final markers = <Marker>{};
     final polylines = <Polyline>{};
 
+    // Marcador de inicio
     if (_currentLocation != null) {
       markers.add(
         Marker(
           markerId: const MarkerId('start_location'),
           position: _currentLocation!,
-          infoWindow: const InfoWindow(
+          infoWindow: InfoWindow(
             title: 'Punto de Inicio',
-            snippet: 'Tu ubicación actual',
+            snippet: 'Salida: ${_optimizedRoute!.formattedPlannedStartTime}',
           ),
           icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen),
         ),
       );
     }
 
-    for (int i = 0; i < _optimizedRoute!.orders.length; i++) {
-      final order = _optimizedRoute!.orders[i];
+    // Marcadores de entregas con información detallada
+    for (final stopInfo in _optimizedRoute!.stopInfos) {
       markers.add(
         Marker(
-          markerId: MarkerId('delivery_${order.id}'),
-          position: order.deliveryLocation,
+          markerId: MarkerId('delivery_${stopInfo.order.id}'),
+          position: stopInfo.location,
           infoWindow: InfoWindow(
-            title: 'Entrega ${i + 1}: ${order.clientName}',
-            snippet: 'Bs. ${order.totalAmount.toStringAsFixed(2)}',
+            title: 'Parada ${stopInfo.sequence}: ${stopInfo.order.clientName}',
+            snippet: 'ETA: ${stopInfo.formattedEstimatedArrival} | ${stopInfo.formattedDistanceFromPrevious}',
           ),
           icon: BitmapDescriptor.defaultMarkerWithHue(
-            _getMarkerHue(i, _optimizedRoute!.orders.length),
+            _getMarkerHue(stopInfo.sequence - 1, _optimizedRoute!.stopInfos.length),
           ),
-          onTap: () => _showOrderDetails(order, i + 1),
+          onTap: () => _showEnhancedOrderDetails(stopInfo),
         ),
       );
     }
 
+    // Polyline de la ruta
     if (_optimizedRoute!.polylinePoints.isNotEmpty) {
       polylines.add(
         Polyline(
@@ -254,7 +283,7 @@ class _RouteMapScreenState extends State<RouteMapScreen> {
             snippet: 'Bs. ${order.totalAmount.toStringAsFixed(2)}',
           ),
           icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueOrange),
-          onTap: () => _showOrderDetails(order, null),
+          onTap: () => _showOrderDetails(order),
         ),
       );
     }
@@ -317,7 +346,242 @@ class _RouteMapScreenState extends State<RouteMapScreen> {
     );
   }
 
-  void _showOrderDetails(Order order, int? sequenceNumber) {
+  void _showEnhancedOrderDetails(RouteStopInfo stopInfo) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => DraggableScrollableSheet(
+        initialChildSize: 0.6,
+        maxChildSize: 0.9,
+        minChildSize: 0.3,
+        builder: (context, scrollController) => Container(
+          padding: const EdgeInsets.all(20),
+          child: SingleChildScrollView(
+            controller: scrollController,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Header
+                Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: Theme.of(context).colorScheme.primaryContainer,
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Text(
+                        '${stopInfo.sequence}',
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                          color: Theme.of(context).colorScheme.onPrimaryContainer,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Parada ${stopInfo.sequence}',
+                            style: const TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.grey,
+                            ),
+                          ),
+                          Text(
+                            stopInfo.order.clientName,
+                            style: const TextStyle(
+                              fontSize: 20,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+
+                const SizedBox(height: 24),
+
+                // Información de timing
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: Colors.blue.withOpacity(0.15),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: Colors.blue.shade200),
+                  ),
+                  child: Column(
+                    children: [
+                      Row(
+                        children: [
+                          Icon(Icons.schedule, color: Colors.blue.shade800),
+                          const SizedBox(width: 8),
+                          const Text(
+                            'Información de Tiempo',
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.blue,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      _buildInfoRow('Hora estimada de llegada:', stopInfo.formattedEstimatedArrival),
+                      _buildInfoRow('Tiempo desde inicio:', stopInfo.formattedTimeFromStart),
+                      _buildInfoRow('Tiempo desde anterior:', stopInfo.formattedTimeFromPrevious),
+                    ],
+                  ),
+                ),
+
+                const SizedBox(height: 16),
+
+                // Información de distancia
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: Colors.green.withOpacity(0.15),
+                  borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: Colors.green.shade200),
+                  ),
+                  child: Column(
+                    children: [
+                      Row(
+                        children: [
+                          Icon(Icons.straighten, color: Colors.green.shade700),
+                          const SizedBox(width: 8),
+                          const Text(
+                            'Información de Distancia',
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.green
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      _buildInfoRow('Distancia desde inicio:', stopInfo.formattedDistanceFromStart),
+                      _buildInfoRow('Distancia desde anterior:', stopInfo.formattedDistanceFromPrevious),
+                    ],
+                  ),
+                ),
+
+                const SizedBox(height: 16),
+
+                // Información del pedido
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: Colors.orange.withOpacity(0.15),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: Colors.orange.shade200),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(Icons.shopping_bag, color: Colors.orange.shade700),
+                          const SizedBox(width: 8),
+                          const Text(
+                            'Detalles del Pedido',
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.orange
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      _buildInfoRow('Cliente:', stopInfo.order.clientName),
+                      _buildInfoRow('Teléfono:', stopInfo.order.clientPhone),
+                      _buildInfoRow('Dirección:', stopInfo.order.address),
+                      _buildInfoRow('Total:', 'Bs. ${stopInfo.order.totalAmount.toStringAsFixed(2)}'),
+
+                      const SizedBox(height: 12),
+                      const Text(
+                        'Productos:',
+                        style: TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                      const SizedBox(height: 8),
+                      ...stopInfo.order.items.map((item) => Padding(
+                        padding: const EdgeInsets.only(left: 8, bottom: 4),
+                        child: Text('• ${item.name} x${item.quantity} - Bs. ${item.price.toStringAsFixed(2)}'),
+                      )),
+
+                      if (stopInfo.order.observations != null && stopInfo.order.observations!.isNotEmpty) ...[
+                        const SizedBox(height: 12),
+                        Text(
+                          'Observaciones: ${stopInfo.order.observations}',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.grey[600],
+                            fontStyle: FontStyle.italic,
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+
+                const SizedBox(height: 20),
+
+                // Botones de acción
+                Row(
+                  children: [
+                    Expanded(
+                      child: ElevatedButton.icon(
+                        onPressed: () {
+                          Navigator.pop(context);
+                          _mapController?.animateCamera(
+                            CameraUpdate.newLatLngZoom(stopInfo.location, 16),
+                          );
+                        },
+                        icon: const Icon(Icons.location_on),
+                        label: const Text('Ver en Mapa'),
+                        style: ElevatedButton.styleFrom(
+                          padding: const EdgeInsets.all(12),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: ElevatedButton.icon(
+                        onPressed: () {
+                          Navigator.pop(context);
+                          // Aquí puedes agregar funcionalidad para llamar
+                          // launch('tel:${stopInfo.order.clientPhone}');
+                        },
+                        icon: const Icon(Icons.phone),
+                        label: const Text('Llamar'),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.green,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.all(12),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showOrderDetails(Order order) {
     showModalBottomSheet(
       context: context,
       shape: const RoundedRectangleBorder(
@@ -330,7 +594,7 @@ class _RouteMapScreenState extends State<RouteMapScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              sequenceNumber != null ? 'Entrega #$sequenceNumber' : 'Pendiente',
+              'Pedido Pendiente',
               style: const TextStyle(
                 fontSize: 18,
                 fontWeight: FontWeight.bold,
@@ -363,24 +627,74 @@ class _RouteMapScreenState extends State<RouteMapScreen> {
     );
   }
 
+  Widget _buildInfoRow(String label, String value) {
+    if (label.toLowerCase().contains('dirección') || label.toLowerCase().contains('direccion')) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 2),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              label,
+              style: const TextStyle(fontSize: 14),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              value,
+              style: const TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.bold,
+              ),
+              softWrap: true,
+            ),
+          ],
+        ),
+      );
+    }
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(
+            label,
+            style: const TextStyle(fontSize: 14),
+          ),
+          Text(
+            value,
+            style: const TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   void _showRouteStatistics() {
     if (_optimizedRoute == null) return;
 
-    final stats = _routeOptimizationService.calculateRouteStatistics(_optimizedRoute!);
+    final stats = _routeService.calculateEnhancedRouteStatistics(_optimizedRoute!);
 
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Estadísticas de Ruta'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            _buildStatRow('Total de entregas:', '${stats['totalOrders']}'),
-            _buildStatRow('Valor total:', 'Bs. ${stats['totalValue'].toStringAsFixed(2)}'),
-            _buildStatRow('Distancia total:', stats['totalDistance']),
-            _buildStatRow('Tiempo estimado:', stats['estimatedTime']),
-            _buildStatRow('Método optimización:', _optimizedRoute!.optimizationMethod),
-          ],
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _buildStatRow('Total de entregas:', '${stats['totalOrders']}'),
+              _buildStatRow('Valor total:', 'Bs. ${stats['totalValue'].toStringAsFixed(2)}'),
+              _buildStatRow('Distancia total:', stats['totalDistance']),
+              _buildStatRow('Tiempo estimado:', stats['estimatedTime']),
+              _buildStatRow('Tiempo promedio por entrega:', stats['averageTimePerDelivery']),
+              _buildStatRow('Tiempo total de servicio:', stats['totalServiceTime']),
+              _buildStatRow('Hora estimada de fin:', _optimizedRoute!.formattedEstimatedEndTime),
+              _buildStatRow('Método optimización:', _optimizedRoute!.optimizationMethod),
+            ],
+          ),
         ),
         actions: [
           TextButton(
@@ -398,10 +712,18 @@ class _RouteMapScreenState extends State<RouteMapScreen> {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(label),
+          Expanded(
+            child: Text(
+              label,
+              style: const TextStyle(fontSize: 14),
+            ),
+          ),
           Text(
             value,
-            style: const TextStyle(fontWeight: FontWeight.bold),
+            style: const TextStyle(
+              fontWeight: FontWeight.bold,
+              fontSize: 14,
+            ),
           ),
         ],
       ),
@@ -418,6 +740,243 @@ class _RouteMapScreenState extends State<RouteMapScreen> {
     );
   }
 
+  void _showRouteDetailPanel() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => DraggableScrollableSheet(
+        initialChildSize: 0.7,
+        maxChildSize: 0.95,
+        minChildSize: 0.3,
+        builder: (context, scrollController) => Container(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Header del panel
+              Row(
+                children: [
+                  Icon(
+                    Icons.route,
+                    color: Theme.of(context).colorScheme.primary,
+                    size: 28,
+                  ),
+                  const SizedBox(width: 12),
+                  const Text(
+                    'Secuencia de Entregas',
+                    style: TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const Spacer(),
+                  IconButton(
+                    onPressed: () => Navigator.pop(context),
+                    icon: const Icon(Icons.close),
+                  ),
+                ],
+              ),
+
+              if (_optimizedRoute != null) ...[
+                const SizedBox(height: 16),
+
+                // Resumen de la ruta
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).colorScheme.primaryContainer.withOpacity(0.3),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Column(
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(
+                            child: _buildSummaryItem(
+                              Icons.local_shipping,
+                              '${_optimizedRoute!.totalOrders} entregas',
+                            ),
+                          ),
+                          Expanded(
+                            child: _buildSummaryItem(
+                              Icons.straighten,
+                              _optimizedRoute!.formattedDistance,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: _buildSummaryItem(
+                              Icons.schedule,
+                              '${_optimizedRoute!.formattedPlannedStartTime} - ${_optimizedRoute!.formattedEstimatedEndTime}',
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+
+                const SizedBox(height: 20),
+
+                // Lista de paradas
+                Expanded(
+                  child: ListView.separated(
+                    controller: scrollController,
+                    itemCount: _optimizedRoute!.stopInfos.length,
+                    separatorBuilder: (context, index) => const Divider(height: 1),
+                    itemBuilder: (context, index) {
+                      final stopInfo = _optimizedRoute!.stopInfos[index];
+                      return Container(
+                        padding: const EdgeInsets.all(16),
+                        child: Row(
+                          children: [
+                            // Número de secuencia
+                            Container(
+                              width: 40,
+                              height: 40,
+                              decoration: BoxDecoration(
+                                color: Theme.of(context).colorScheme.primary,
+                                borderRadius: BorderRadius.circular(20),
+                              ),
+                              child: Center(
+                                child: Text(
+                                  '${stopInfo.sequence}',
+                                  style: TextStyle(
+                                    color: Theme.of(context).colorScheme.onPrimary,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ),
+                            ),
+
+                            const SizedBox(width: 16),
+
+                            // Información de la parada
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    stopInfo.order.clientName,
+                                    style: const TextStyle(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    stopInfo.order.address,
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      color: Colors.grey[600],
+                                    ),
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                  const SizedBox(height: 8),
+                                  Row(
+                                    children: [
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 8,
+                                          vertical: 4,
+                                        ),
+                                        decoration: BoxDecoration(
+                                          color: Colors.blue.shade100,
+                                          borderRadius: BorderRadius.circular(12),
+                                        ),
+                                        child: Text(
+                                          stopInfo.formattedEstimatedArrival,
+                                          style: TextStyle(
+                                            fontSize: 12,
+                                            color: Colors.blue.shade800,
+                                            fontWeight: FontWeight.w500,
+                                          ),
+                                        ),
+                                      ),
+                                      const SizedBox(width: 8),
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 8,
+                                          vertical: 4,
+                                        ),
+                                        decoration: BoxDecoration(
+                                          color: Colors.green.shade100,
+                                          borderRadius: BorderRadius.circular(12),
+                                        ),
+                                        child: Text(
+                                          stopInfo.formattedDistanceFromPrevious,
+                                          style: TextStyle(
+                                            fontSize: 12,
+                                            color: Colors.green.shade800,
+                                            fontWeight: FontWeight.w500,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ],
+                              ),
+                            ),
+
+                            // Valor del pedido
+                            Column(
+                              children: [
+                                Text(
+                                  'Bs. ${stopInfo.order.totalAmount.toStringAsFixed(0)}',
+                                  style: const TextStyle(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                                IconButton(
+                                  onPressed: () {
+                                    Navigator.pop(context);
+                                    _showEnhancedOrderDetails(stopInfo);
+                                  },
+                                  icon: const Icon(Icons.info_outline),
+                                  iconSize: 20,
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSummaryItem(IconData icon, String text) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, size: 16, color: Colors.grey[600]),
+        const SizedBox(width: 4),
+        Flexible(
+          child: Text(
+            text,
+            style: const TextStyle(fontSize: 12),
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -426,12 +985,11 @@ class _RouteMapScreenState extends State<RouteMapScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Ruta Optimizada'),
+        title: const Text('Ruta Optimizada Avanzada'),
         backgroundColor: theme.colorScheme.surface.withValues(alpha: 0.95),
         foregroundColor: theme.colorScheme.onSurface,
         elevation: 0,
         actions: [
-          // ✅ Indicador de carga de ubicación en el AppBar
           if (_isLoadingLocation)
             Padding(
               padding: EdgeInsets.all(isTablet ? 20 : 16),
@@ -451,6 +1009,12 @@ class _RouteMapScreenState extends State<RouteMapScreen> {
               onPressed: _showRouteStatistics,
               icon: const Icon(Icons.analytics),
               tooltip: 'Estadísticas',
+            ),
+          if (_optimizedRoute != null)
+            IconButton(
+              onPressed: _showRouteDetailPanel,
+              icon: const Icon(Icons.list),
+              tooltip: 'Ver Secuencia',
             ),
           SizedBox(width: isTablet ? 16 : 8),
         ],
@@ -510,14 +1074,14 @@ class _RouteMapScreenState extends State<RouteMapScreen> {
             style: theme.brightness == Brightness.dark ? _darkMapStyle : null,
           ),
 
-          // ✅ Botones de acción flotantes
+          // Botones de acción flotantes
           Positioned(
             bottom: isTablet ? 200 : 180,
             right: isTablet ? 32 : 20,
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                // ✅ Botón de gestión de entregas
+                // Botón de gestión de entregas
                 Container(
                   margin: const EdgeInsets.only(bottom: 16),
                   decoration: BoxDecoration(
@@ -544,7 +1108,7 @@ class _RouteMapScreenState extends State<RouteMapScreen> {
                   ),
                 ),
 
-                // ✅ Botón para actualizar ubicación
+                // Botón para actualizar ubicación
                 Container(
                   decoration: BoxDecoration(
                     borderRadius: BorderRadius.circular(isTablet ? 20 : 16),
@@ -582,7 +1146,7 @@ class _RouteMapScreenState extends State<RouteMapScreen> {
             ),
           ),
 
-          // ✅ Botón para centrar en ubicación actual
+          // Botón para centrar en ubicación actual
           Positioned(
             bottom: isTablet ? 120 : 100,
             right: isTablet ? 32 : 20,
@@ -612,6 +1176,37 @@ class _RouteMapScreenState extends State<RouteMapScreen> {
             ),
           ),
 
+          // Botón para ver secuencia de entregas
+          if (_optimizedRoute != null)
+            Positioned(
+              bottom: isTablet ? 40 : 20,
+              right: isTablet ? 32 : 20,
+              child: Container(
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(isTablet ? 20 : 16),
+                  boxShadow: [
+                    BoxShadow(
+                      color: theme.colorScheme.shadow.withOpacity(0.3),
+                      blurRadius: 8,
+                      offset: const Offset(0, 4),
+                    ),
+                  ],
+                ),
+                child: FloatingActionButton(
+                  heroTag: "route_details",
+                  onPressed: _showRouteDetailPanel,
+                  backgroundColor: Colors.purple,
+                  foregroundColor: Colors.white,
+                  elevation: 0,
+                  tooltip: 'Ver Secuencia de Entregas',
+                  child: Icon(
+                    Icons.format_list_numbered,
+                    size: isTablet ? 28 : 24,
+                  ),
+                ),
+              ),
+            ),
+
           // Información de la ruta optimizada
           if (_optimizedRoute != null)
             Positioned(
@@ -639,61 +1234,70 @@ class _RouteMapScreenState extends State<RouteMapScreen> {
                               fontWeight: FontWeight.bold,
                             ),
                           ),
+                          const Spacer(),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 4,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.green.shade100,
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: Text(
+                              '${_optimizedRoute!.formattedPlannedStartTime} - ${_optimizedRoute!.formattedEstimatedEndTime}',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.green.shade800,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          ),
                         ],
                       ),
                       const SizedBox(height: 12),
                       Row(
                         children: [
                           Expanded(
-                            child: _buildInfoItem(
+                            child: _buildSummaryItem(
                               Icons.local_shipping,
                               '${_optimizedRoute!.totalOrders} entregas',
                             ),
                           ),
                           Expanded(
-                            child: _buildInfoItem(
+                            child: _buildSummaryItem(
                               Icons.straighten,
                               _optimizedRoute!.formattedDistance,
                             ),
                           ),
                           Expanded(
-                            child: _buildInfoItem(
+                            child: _buildSummaryItem(
                               Icons.access_time,
                               _optimizedRoute!.formattedDuration,
                             ),
                           ),
                         ],
                       ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-
-          // Información cuando no hay ruta optimizada
-          if (_optimizedRoute == null && _pendingOrders.isNotEmpty)
-            Positioned(
-              top: 16,
-              left: 16,
-              right: 16,
-              child: Card(
-                elevation: 8,
-                child: Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        '${_pendingOrders.length} entregas pendientes',
-                        style: const TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
                       const SizedBox(height: 8),
-                      const Text(
-                        'Presiona el botón para optimizar la ruta',
-                        style: TextStyle(color: Colors.grey),
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 6,
+                        ),
+                        decoration: BoxDecoration(
+                          color: theme.colorScheme.primaryContainer.withOpacity(0.3),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Text(
+                          'Toca los marcadores para ver detalles de cada entrega',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: theme.colorScheme.onSurface.withOpacity(0.7),
+                            fontStyle: FontStyle.italic,
+                          ),
+                          textAlign: TextAlign.center,
+                        ),
                       ),
                     ],
                   ),
@@ -716,26 +1320,13 @@ class _RouteMapScreenState extends State<RouteMapScreen> {
           height: 20,
           child: CircularProgressIndicator(strokeWidth: 2),
         )
-            : const Icon(Icons.route),
-        label: Text(_isOptimizing ? 'Optimizando...' : 'Optimizar Ruta'),
+            : const Icon(Icons.auto_fix_high),
+        label: Text(_isOptimizing
+            ? 'Optimizando...'
+            : 'Optimizar Ruta Avanzada'),
+        backgroundColor: Colors.deepPurple,
+        foregroundColor: Colors.white,
       ),
-    );
-  }
-
-  Widget _buildInfoItem(IconData icon, String text) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Icon(icon, size: 16, color: Colors.grey[600]),
-        const SizedBox(width: 4),
-        Flexible(
-          child: Text(
-            text,
-            style: const TextStyle(fontSize: 12),
-            overflow: TextOverflow.ellipsis,
-          ),
-        ),
-      ],
     );
   }
 
