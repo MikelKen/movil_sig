@@ -115,7 +115,7 @@ class DioProvider {
         if (observations != null) 'observations': observations,
         if (status == 'entregado') 'deliveryTime': DateTime.now().toIso8601String(),
       };
-      print('datos============================ : $data' );
+
       final response = await _dio.patch('/orders/$orderId/status', data: data);
 
       if (response.statusCode == 200) {

@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import '../models/order.dart';
-import '../services/delivery_service.dart';
 import '../providers/dio_provider.dart' hide PaymentMethod;
 
 class OrderCard extends StatefulWidget {
@@ -20,7 +19,6 @@ class OrderCard extends StatefulWidget {
 }
 
 class _OrderCardState extends State<OrderCard> with TickerProviderStateMixin {
-  final DeliveryService _deliveryService = DeliveryService();
   final DioProvider _dioProvider = DioProvider(); // Instancia del DioProvider
   bool _isLoading = false;
   bool _isExpanded = false;

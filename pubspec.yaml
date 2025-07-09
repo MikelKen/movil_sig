@@ -42,6 +42,8 @@ dependencies:
   geolocator: ^10.1.0
   flutter_polyline_points: ^2.0.0
   http: ^1.1.0
+
+  flutter_tts: ^3.8.5        # Text-to-Speech
   
   # UI and animations
   flutter_animate: ^4.5.0

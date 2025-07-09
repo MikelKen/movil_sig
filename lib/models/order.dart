@@ -84,7 +84,7 @@ class Order {
     if (paymentMethod == null) return 'No especificado';
     switch (paymentMethod!) {
       case PaymentMethod.qr:
-        return 'QR';;
+        return 'QR';
       case PaymentMethod.efectivo:
         return 'Efectivo';
       case PaymentMethod.transferencia:

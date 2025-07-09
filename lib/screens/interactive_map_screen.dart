@@ -4,15 +4,12 @@ import 'package:flutter/services.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import '../models/saved_location.dart';
 import '../models/order.dart';
-import '../models/delivery_route.dart';
 import '../services/location_service.dart';
 import '../services/storage_service.dart';
 import '../services/delivery_service.dart';
-import '../services/route_visualization_service.dart';
 import '../widgets/add_location_dialog.dart';
 import '../widgets/location_list_panel.dart';
 import 'delivery_management_screen.dart' as delivery_screen;
-import 'route_map_screen.dart' as route_screen;
 
 class InteractiveMapScreen extends StatefulWidget {
   const InteractiveMapScreen({Key? key}) : super(key: key);
@@ -26,14 +23,12 @@ class _InteractiveMapScreenState extends State<InteractiveMapScreen>
   GoogleMapController? _mapController;
   final LocationService _locationService = LocationService();
   final DeliveryService _deliveryService = DeliveryService();
-  final RouteVisualizationService _routeVisualizationService = RouteVisualizationService();
   StorageService? _storageService;
 
   // Location data
   LatLng? _currentLocation;
   List<SavedLocation> _savedLocations = [];
   List<Order> _pendingOrders = [];
-  DeliveryRoute? _activeRoute;
   Set<Marker> _markers = {};
   Set<Polyline> _polylines = {};
 
@@ -41,16 +36,9 @@ class _InteractiveMapScreenState extends State<InteractiveMapScreen>
   bool _isLoading = true;
   bool _isLoadingLocation = false;
   bool _showDeliveryMarkers = true;
-  bool _showRouteVisualization = false;
-  bool _isLoadingRoute = false;
   bool _mapInitialized = false;
   String? _errorMessage;
 
-  // Optimizaciones para rendimiento
-  static const CameraPosition _santaCruzPosition = CameraPosition(
-    target: LatLng(-17.8146, -63.1561),
-    zoom: 12.0,
-  );
 
   // Timer para debounce de actualizaciones
   Timer? _debounceTimer;
@@ -545,19 +533,6 @@ class _InteractiveMapScreenState extends State<InteractiveMapScreen>
     });
   }
 
-  void _navigateToOptimizedRoute() {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (context) => const route_screen.RouteMapScreen(),
-      ),
-    ).then((_) {
-      if (mounted) {
-        _loadPendingOrders();
-      }
-    });
-  }
-
   void _showSuccessMessage(String message) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
@@ -591,79 +566,6 @@ class _InteractiveMapScreenState extends State<InteractiveMapScreen>
     );
   }
 
-  Future<void> _toggleRouteVisualization() async {
-    setState(() {
-      _showRouteVisualization = !_showRouteVisualization;
-      _isLoadingRoute = true;
-    });
-
-    if (_showRouteVisualization) {
-      try {
-        final routes = await _deliveryService.getRoutes();
-        if (routes.isNotEmpty && mounted) {
-          final activeRoute = routes.first;
-
-          setState(() {
-            _activeRoute = activeRoute;
-          });
-
-          if (_currentLocation != null) {
-            final routeMarkers = _routeVisualizationService.generateRouteMarkers(
-              deliveryRoute: activeRoute,
-              startLocation: _currentLocation!,
-              onOrderTap: _onOrderMarkerTap,
-            );
-
-            final routePolylines = await _routeVisualizationService.generateRoutePolylines(
-              deliveryRoute: activeRoute,
-              startLocation: _currentLocation!,
-            );
-
-            if (mounted) {
-              setState(() {
-                _markers = routeMarkers;
-                _polylines = routePolylines;
-              });
-
-              if (_mapController != null) {
-                await _routeVisualizationService.animateCameraToShowRoute(
-                  mapController: _mapController!,
-                  deliveryRoute: activeRoute,
-                  startLocation: _currentLocation!,
-                );
-              }
-
-              _showSuccessMessage('Ruta visualizada en el mapa');
-            }
-          }
-        } else {
-          _showInfoMessage('No hay rutas disponibles. Genera una ruta primero.');
-          setState(() {
-            _showRouteVisualization = false;
-          });
-        }
-      } catch (e) {
-        debugPrint('Error loading route visualization: $e');
-        _showErrorMessage('Error al cargar la visualización de ruta');
-        setState(() {
-          _showRouteVisualization = false;
-        });
-      }
-    } else {
-      setState(() {
-        _activeRoute = null;
-        _polylines.clear();
-      });
-      _updateMarkers();
-      _showInfoMessage('Visualización de ruta ocultada');
-    }
-
-    if (mounted) {
-      setState(() {
-        _isLoadingRoute = false;
-      });
-    }
-  }
 
   Widget _buildErrorWidget() {
     return Center(

@@ -2,9 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:sig/providers/dio_provider.dart';
 import 'package:sig/models/enhanced_route_models.dart';
-import 'package:sig/services/route_optimization_service.dart';
 import '../models/order.dart';
-import '../models/delivery_route.dart';
 import '../services/delivery_service.dart' hide DeliveryStats;
 import '../services/enhanced_delivery_service.dart';
 import '../services/enhanced_route_optimization_service.dart'; // Agregado
@@ -30,7 +28,6 @@ class _DeliveryManagementScreenState extends State<DeliveryManagementScreen>
 
   List<Order> _allOrders = [];
   List<Order> _pendingOrders = [];
-  DeliveryRoute? _currentRoute;
   EnhancedDeliveryRoute? _enhancedCurrentRoute;
   DeliveryStats? _stats;
   bool _isLoading = true;
@@ -537,12 +534,7 @@ class _DeliveryManagementScreenState extends State<DeliveryManagementScreen>
                     Icons.local_shipping,
                     Colors.blue,
                   ),
-                  _buildStatCard(
-                    'Ingresos Hoy',
-                    'Bs. ${_stats!.totalRevenue.toStringAsFixed(2)}',
-                    Icons.attach_money,
-                    Colors.purple,
-                  ),
+
                 ],
               ),
               const SizedBox(height: 24),
