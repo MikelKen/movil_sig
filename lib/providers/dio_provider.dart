@@ -9,7 +9,7 @@ enum PaymentMethod {
 }
 
 class DioProvider {
-  static const String _baseUrl = 'http://192.168.100.9:3000';
+  static const String _baseUrl = 'https://backend-sig.onrender.com';
   late Dio _dio;
 
   DioProvider() {
@@ -41,16 +41,21 @@ class DioProvider {
       if (response.statusCode == 200 && response.data is List) {
         print("===================================");
         print(response);
-        final List<Map<String, dynamic>> orders = response.data
-            .map<Map<String, dynamic>>((item) => item as Map<String, dynamic>)
-            .toList();
+        final List<Map<String, dynamic>> orders =
+            response.data
+                .map<Map<String, dynamic>>(
+                  (item) => item as Map<String, dynamic>,
+                )
+                .toList();
 
         print('✅ Pedidos obtenidos exitosamente: ${orders.length}');
 
         // Log de algunos campos importantes para debug
         if (orders.isNotEmpty) {
           final firstOrder = orders.first;
-          print('📋 Primer pedido: ${firstOrder['clientName']} - ${firstOrder['status']}');
+          print(
+            '📋 Primer pedido: ${firstOrder['clientName']} - ${firstOrder['status']}',
+          );
         }
 
         return orders;
@@ -81,9 +86,12 @@ class DioProvider {
       final response = await _dio.get('/orders/pending');
 
       if (response.statusCode == 200 && response.data is List) {
-        final List<Map<String, dynamic>> orders = response.data
-            .map<Map<String, dynamic>>((item) => item as Map<String, dynamic>)
-            .toList();
+        final List<Map<String, dynamic>> orders =
+            response.data
+                .map<Map<String, dynamic>>(
+                  (item) => item as Map<String, dynamic>,
+                )
+                .toList();
 
         print('✅ Pedidos pendientes obtenidos: ${orders.length}');
         return orders;
@@ -100,20 +108,20 @@ class DioProvider {
 
   /// Actualizar estado de un pedido
   Future<Map<String, dynamic>?> updateOrderStatus(
-      String orderId,
-      String status, {
-        String? paymentMethod,
-        String? observations,
-      }) async {
+    String orderId,
+    String status, {
+    String? paymentMethod,
+    String? observations,
+  }) async {
     try {
       print('🔄 Actualizando pedido $orderId a estado: $status');
-
 
       final data = {
         'status': status,
         if (paymentMethod != null) 'paymentMethod': paymentMethod,
         if (observations != null) 'observations': observations,
-        if (status == 'entregado') 'deliveryTime': DateTime.now().toIso8601String(),
+        if (status == 'entregado')
+          'deliveryTime': DateTime.now().toIso8601String(),
       };
 
       final response = await _dio.patch('/orders/$orderId/status', data: data);
@@ -144,7 +152,9 @@ class DioProvider {
       if (response.statusCode == 200) {
         print('✅ Estadísticas obtenidas exitosamente');
         final stats = response.data as Map<String, dynamic>;
-        print('📊 Stats: ${stats['totalOrders']} total, ${stats['pendingOrders']} pendientes');
+        print(
+          '📊 Stats: ${stats['totalOrders']} total, ${stats['pendingOrders']} pendientes',
+        );
         return stats;
       } else {
         print('⚠️ Error al obtener estadísticas: ${response.statusCode}');
@@ -162,7 +172,9 @@ class DioProvider {
   // ===== MÉTODOS PARA ROUTES =====
 
   /// Crear ruta optimizada
-  Future<Map<String, dynamic>?> createOptimizedRoute(Map<String, dynamic> routeData) async {
+  Future<Map<String, dynamic>?> createOptimizedRoute(
+    Map<String, dynamic> routeData,
+  ) async {
     try {
       print('🔄 Creando ruta optimizada');
       print('📝 Datos de ruta: ${routeData.keys.join(', ')}');
@@ -196,9 +208,12 @@ class DioProvider {
       final response = await _dio.get('/routes/formatted');
 
       if (response.statusCode == 200 && response.data is List) {
-        final List<Map<String, dynamic>> routes = response.data
-            .map<Map<String, dynamic>>((item) => item as Map<String, dynamic>)
-            .toList();
+        final List<Map<String, dynamic>> routes =
+            response.data
+                .map<Map<String, dynamic>>(
+                  (item) => item as Map<String, dynamic>,
+                )
+                .toList();
 
         print('✅ Rutas obtenidas: ${routes.length}');
         return routes;
@@ -288,7 +303,9 @@ class DioProvider {
       if (response.statusCode == 200) {
         print('✅ Conexión exitosa con el servidor');
         final data = response.data as Map<String, dynamic>;
-        print('🏥 Health check: ${data['status']} - ${data['service'] ?? 'Unknown'}');
+        print(
+          '🏥 Health check: ${data['status']} - ${data['service'] ?? 'Unknown'}',
+        );
         return true;
       } else {
         print('⚠️ Servidor responde pero con código: ${response.statusCode}');
