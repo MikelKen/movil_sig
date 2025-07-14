@@ -15,7 +15,7 @@ class MyApp extends StatelessWidget {
       title: 'Mapa Interactivo',
       theme: _buildLightTheme(),
       darkTheme: _buildDarkTheme(),
-      themeMode: ThemeMode.dark, // Modo oscuro por defecto
+      themeMode: ThemeMode.dark,
       home: const DeliveryManagementScreen(),
       debugShowCheckedModeBanner: false,
     );

@@ -4,7 +4,7 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 
 class DirectionsService {
   static const String _baseUrl = 'https://maps.googleapis.com/maps/api/directions/json';
-  static const String _apiKey = 'AIzaSyDbpv3i7Tno3aicF4_1GnUUHGQLFo1GOLY';
+  static const String _apiKey = 'AIzaSyDPlWLKjTzJFaGaai89Z2fCF1MzOYGNbjs';
 
   // Obtener direcciones entre múltiples puntos (waypoints)
   Future<DirectionsResult?> getDirections({
