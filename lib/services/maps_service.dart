@@ -7,7 +7,7 @@ import '../models/delivery_route.dart';
 import '../models/order.dart';
 
 class MapsService {
-  static const String _googleMapsApiKey = 'AIzaSyDPlWLKjTzJFaGaai89Z2fCF1MzOYGNbjs';
+  static const String _googleMapsApiKey = 'YOUR_API_KEY_HERE';
   static const String _baseUrl = 'https://maps.googleapis.com/maps/api/directions/json';
 
   // Obtener ruta detallada usando Google Directions API

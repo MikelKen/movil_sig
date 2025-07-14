@@ -6,7 +6,7 @@ class ApiConfig {
   // 3. Distance Matrix API
   // 4. Places API (opcional)
 
-  static const String googleMapsApiKey = 'AIzaSyDPlWLKjTzJFaGaai89Z2fCF1MzOYGNbjs';
+  static const String googleMapsApiKey = 'YOUR_API_KEY_HERE';
 
   // URLs base para las APIs de Google
   static const String directionsApiUrl = 'https://maps.googleapis.com/maps/api/directions/json';

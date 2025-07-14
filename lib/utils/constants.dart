@@ -1,7 +1,7 @@
 class AppConstants {
   // Google Maps API Key
   static const String googleMapsApiKey =
-      'AIzaSyDPlWLKjTzJFaGaai89Z2fCF1MzOYGNbjs';
+      'YOUR_API_KEY_HERE';
 
   // Default locations
   static const double defaultLat = -17.8146;

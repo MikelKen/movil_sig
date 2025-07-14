@@ -60,7 +60,7 @@ Una aplicación interactiva de mapas que permite marcar, guardar y gestionar ubi
    ```
 
 3. **Configurar API Key**
-   - La API Key ya está configurada en el código: `AIzaSyDPlWLKjTzJFaGaai89Z2fCF1MzOYGNbjs`
+   - La API Key ya está configurada en el código: `YOUR_API_KEY_HERE`
    - Asegúrate de que las siguientes APIs estén habilitadas en Google Cloud Console:
      - Maps SDK for Android
      - Maps SDK for iOS
